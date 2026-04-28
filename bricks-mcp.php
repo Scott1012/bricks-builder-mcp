@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.3.3
+ * Version: 3.3.4
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.3.3');
+define('BRICKS_MCP_VERSION', '3.3.4');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -824,11 +824,11 @@ class BricksMCPServer {
         }
 
         // Activer Bricks Builder sur cette page
-        // Le meta _bricks_editor_mode = 'bricks' active Bricks
-        // Le meta _bricks_page_content_2 doit avoir une valeur non-vide pour être matché
-        // par meta_query EXISTS sur certaines configs WP. v3.3.2 — on initialise avec
-        // une section vide minimale au lieu d'un tableau vide.
-        update_post_meta($page_id, '_bricks_editor_mode', 'bricks');
+        // v3.3.4 — Utiliser le même pattern que api_update_page_json pour éviter
+        // les problèmes de update_post_meta qui ne crée pas la ligne dans certaines configs WP.
+        delete_post_meta($page_id, '_bricks_editor_mode');
+        add_post_meta($page_id, '_bricks_editor_mode', 'bricks', true);
+
         $initial_content = [
             [
                 'id'       => substr(md5(uniqid()), 0, 6),
@@ -838,7 +838,8 @@ class BricksMCPServer {
                 'settings' => [],
             ],
         ];
-        update_post_meta($page_id, '_bricks_page_content_2', $initial_content);
+        delete_post_meta($page_id, '_bricks_page_content_2');
+        add_post_meta($page_id, '_bricks_page_content_2', $initial_content, true);
 
         // Si demandé, configurer comme page d'accueil
         $is_homepage = false;
