@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.5.0
+ * Version: 3.6.0
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.5.0');
+define('BRICKS_MCP_VERSION', '3.6.0');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -290,6 +290,45 @@ class BricksMCPServer {
             'callback' => [$this, 'api_add_color_to_palette'],
             'permission_callback' => [$this, 'check_api_key']
         ]);
+
+        // ============================================================
+        // 🆕 v3.6 — INSPECTION + CUSTOM CODE + FONTS + CODE EXEC (Phase A)
+        // ============================================================
+        register_rest_route($namespace, '/list-bricks-options', ['methods' => 'GET', 'callback' => [$this, 'api_list_bricks_options'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/get-bricks-option', ['methods' => 'POST', 'callback' => [$this, 'api_get_bricks_option'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/get-custom-code', ['methods' => 'GET', 'callback' => [$this, 'api_get_custom_code'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/set-custom-code', ['methods' => 'POST', 'callback' => [$this, 'api_set_custom_code'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/get-code-execution-status', ['methods' => 'GET', 'callback' => [$this, 'api_get_code_execution_status'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/set-code-execution', ['methods' => 'POST', 'callback' => [$this, 'api_set_code_execution'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/list-custom-fonts', ['methods' => 'GET', 'callback' => [$this, 'api_list_custom_fonts'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/register-custom-font', ['methods' => 'POST', 'callback' => [$this, 'api_register_custom_font'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/delete-custom-font', ['methods' => 'POST', 'callback' => [$this, 'api_delete_custom_font'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/register-google-font-locally', ['methods' => 'POST', 'callback' => [$this, 'api_register_google_font_locally'], 'permission_callback' => [$this, 'check_api_key']]);
+
+        // ============================================================
+        // 🆕 v3.6 — GLOBAL CLASSES + THEME STYLES + PAGE CODE (Phase B)
+        // ============================================================
+        register_rest_route($namespace, '/list-global-classes', ['methods' => 'GET', 'callback' => [$this, 'api_list_global_classes'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/create-global-class', ['methods' => 'POST', 'callback' => [$this, 'api_create_global_class'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/update-global-class', ['methods' => 'POST', 'callback' => [$this, 'api_update_global_class'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/delete-global-class', ['methods' => 'POST', 'callback' => [$this, 'api_delete_global_class'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/list-theme-styles', ['methods' => 'GET', 'callback' => [$this, 'api_list_theme_styles'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/create-theme-style', ['methods' => 'POST', 'callback' => [$this, 'api_create_theme_style'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/update-theme-style', ['methods' => 'POST', 'callback' => [$this, 'api_update_theme_style'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/delete-theme-style', ['methods' => 'POST', 'callback' => [$this, 'api_delete_theme_style'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/get-page-custom-code', ['methods' => 'POST', 'callback' => [$this, 'api_get_page_custom_code'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/set-page-custom-code', ['methods' => 'POST', 'callback' => [$this, 'api_set_page_custom_code'], 'permission_callback' => [$this, 'check_api_key']]);
+
+        // ============================================================
+        // 🆕 v3.6 — STYLE MANAGER 2.2 + COMPONENTS (Phase C)
+        // ============================================================
+        register_rest_route($namespace, '/list-typography-scales', ['methods' => 'GET', 'callback' => [$this, 'api_list_typography_scales'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/set-typography-scale', ['methods' => 'POST', 'callback' => [$this, 'api_set_typography_scale'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/list-spacing-scales', ['methods' => 'GET', 'callback' => [$this, 'api_list_spacing_scales'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/set-spacing-scale', ['methods' => 'POST', 'callback' => [$this, 'api_set_spacing_scale'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/list-css-variables', ['methods' => 'GET', 'callback' => [$this, 'api_list_css_variables'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/set-css-variable', ['methods' => 'POST', 'callback' => [$this, 'api_set_css_variable'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/list-components', ['methods' => 'GET', 'callback' => [$this, 'api_list_components'], 'permission_callback' => [$this, 'check_api_key']]);
     }
 
     // Vérification de la clé API
@@ -1505,6 +1544,682 @@ class BricksMCPServer {
             'palette_count' => count($palette),
             'message'       => "Couleur '{$name}' ajoutée à la palette globale",
         ];
+    }
+
+    // ============================================================
+    // 🆕 v3.6 — PHASE A : INSPECTION + CUSTOM CODE + FONTS + CODE EXEC
+    // ============================================================
+
+    /**
+     * GET /list-bricks-options — Dump toutes les options WP commençant par "bricks_".
+     * Outil debug essentiel pour cartographier ce qui existe en base.
+     */
+    public function api_list_bricks_options($request) {
+        global $wpdb;
+        $rows = $wpdb->get_results("SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE 'bricks\\_%' ORDER BY option_name", ARRAY_A);
+        $out = [];
+        foreach ($rows as $row) {
+            $value = maybe_unserialize($row['option_value']);
+            $out[] = [
+                'name'   => $row['option_name'],
+                'type'   => is_array($value) ? 'array' : (is_object($value) ? 'object' : gettype($value)),
+                'size'   => is_string($value) ? strlen($value) : (is_array($value) ? count($value) : null),
+                'preview' => is_array($value) || is_object($value)
+                    ? array_slice(array_keys((array) $value), 0, 20)
+                    : (is_string($value) && strlen($value) > 200 ? substr($value, 0, 200) . '...' : $value),
+            ];
+        }
+        return ['success' => true, 'count' => count($out), 'options' => $out];
+    }
+
+    /**
+     * POST /get-bricks-option — Récupère une option Bricks spécifique en intégralité.
+     * Params : name (str, ex: 'bricks_global_settings')
+     */
+    public function api_get_bricks_option($request) {
+        $name = sanitize_text_field($request->get_param('name'));
+        if (empty($name)) {
+            return new WP_Error('missing_name', 'name est requis', ['status' => 400]);
+        }
+        if (strpos($name, 'bricks_') !== 0) {
+            return new WP_Error('invalid_name', 'Le nom doit commencer par "bricks_"', ['status' => 400]);
+        }
+        $value = get_option($name);
+        return ['success' => true, 'name' => $name, 'value' => $value];
+    }
+
+    /**
+     * GET /get-custom-code — Récupère le custom code global Bricks (header/body/footer).
+     * Stocké dans bricks_global_settings sous les clés customCss/customScriptsHeader/customScriptsBodyHeader/customScriptsBodyFooter.
+     */
+    public function api_get_custom_code($request) {
+        $settings = get_option('bricks_global_settings', []);
+        if (!is_array($settings)) $settings = [];
+        return [
+            'success' => true,
+            'customCss'                  => $settings['customCss'] ?? '',
+            'customScriptsHeader'        => $settings['customScriptsHeader'] ?? '',
+            'customScriptsBodyHeader'    => $settings['customScriptsBodyHeader'] ?? '',
+            'customScriptsBodyFooter'    => $settings['customScriptsBodyFooter'] ?? '',
+        ];
+    }
+
+    /**
+     * POST /set-custom-code — Met à jour le custom code global Bricks.
+     * Params (tous optionnels, seuls les champs fournis sont modifiés) :
+     *   - customCss (CSS injecté dans <head>)
+     *   - customScriptsHeader (HTML/scripts injectés dans <head>) — IDÉAL pour Google Fonts <link>
+     *   - customScriptsBodyHeader (HTML injecté juste après <body>)
+     *   - customScriptsBodyFooter (HTML injecté juste avant </body>)
+     */
+    public function api_set_custom_code($request) {
+        $settings = get_option('bricks_global_settings', []);
+        if (!is_array($settings)) $settings = [];
+
+        $changed = [];
+        foreach (['customCss', 'customScriptsHeader', 'customScriptsBodyHeader', 'customScriptsBodyFooter'] as $key) {
+            $value = $request->get_param($key);
+            if ($value !== null) {
+                // On accepte aussi la chaîne vide pour vider un champ
+                $settings[$key] = (string) $value;
+                $changed[] = $key;
+            }
+        }
+
+        if (empty($changed)) {
+            return new WP_Error('no_changes', 'Aucun champ fourni (customCss, customScriptsHeader, customScriptsBodyHeader, customScriptsBodyFooter)', ['status' => 400]);
+        }
+
+        update_option('bricks_global_settings', $settings);
+        return ['success' => true, 'updated' => $changed, 'message' => 'Custom code Bricks mis à jour'];
+    }
+
+    /**
+     * GET /get-code-execution-status — État de l'exécution des code elements.
+     * Bricks 1.9.7+ désactive code execution par défaut pour sécurité.
+     * Stocké dans bricks_global_settings sous executeCodeAllowed (ou similaire) + capabilities WP par rôle.
+     */
+    public function api_get_code_execution_status($request) {
+        $settings = get_option('bricks_global_settings', []);
+        if (!is_array($settings)) $settings = [];
+
+        // Tester plusieurs noms de clé possibles selon la version Bricks
+        $enabled = false;
+        $key_used = null;
+        foreach (['executeCodeAllowed', 'codeExecutionEnabled', 'executeCode'] as $key) {
+            if (isset($settings[$key])) {
+                $enabled = (bool) $settings[$key];
+                $key_used = $key;
+                break;
+            }
+        }
+
+        // Récupérer les rôles autorisés (capability bricks_execute_code)
+        $allowed_roles = [];
+        if (function_exists('wp_roles')) {
+            $roles = wp_roles()->roles;
+            foreach ($roles as $role_slug => $role_data) {
+                if (!empty($role_data['capabilities']['bricks_execute_code'])) {
+                    $allowed_roles[] = $role_slug;
+                }
+            }
+        }
+
+        return [
+            'success'       => true,
+            'enabled'       => $enabled,
+            'setting_key'   => $key_used,
+            'allowed_roles' => $allowed_roles,
+            'note'          => 'Bricks 1.9.7+ désactive par défaut. Pour activer : Bricks → Settings → Custom Code → Enable code execution + cocher les rôles. La capability WP est "bricks_execute_code".',
+        ];
+    }
+
+    /**
+     * POST /set-code-execution — Active/désactive l'exécution des code elements + rôles autorisés.
+     * Params :
+     *   - enabled (bool, requis)
+     *   - roles (array of role slugs, ex: ['administrator']) — rôles qui peuvent exécuter du code
+     */
+    public function api_set_code_execution($request) {
+        $enabled = (bool) $request->get_param('enabled');
+        $roles_param = $request->get_param('roles');
+        if (!is_array($roles_param)) $roles_param = [];
+
+        $settings = get_option('bricks_global_settings', []);
+        if (!is_array($settings)) $settings = [];
+        // On essaie d'écrire sur les 2 clés possibles selon la version pour être safe
+        $settings['executeCodeAllowed'] = $enabled;
+        $settings['codeExecutionEnabled'] = $enabled;
+        update_option('bricks_global_settings', $settings);
+
+        // Mettre à jour la capability bricks_execute_code par rôle
+        if (function_exists('wp_roles')) {
+            $all_roles = wp_roles()->roles;
+            foreach (array_keys($all_roles) as $role_slug) {
+                $role = get_role($role_slug);
+                if (!$role) continue;
+                if (in_array($role_slug, $roles_param, true) && $enabled) {
+                    $role->add_cap('bricks_execute_code');
+                } else {
+                    $role->remove_cap('bricks_execute_code');
+                }
+            }
+        }
+
+        return [
+            'success'       => true,
+            'enabled'       => $enabled,
+            'allowed_roles' => $roles_param,
+            'message'       => $enabled
+                ? "Code execution activé pour les rôles : " . implode(', ', $roles_param)
+                : "Code execution désactivé",
+            'security_note' => 'Bricks exige aussi des "code signatures" valides — chaque code element doit être édité+sauvé par un user autorisé pour fonctionner. Voir Bricks → Code Review.',
+        ];
+    }
+
+    /**
+     * GET /list-custom-fonts — Liste les custom fonts enregistrées dans Bricks Font Manager.
+     * Bricks stocke les custom fonts dans le custom post type "bricks_fonts".
+     */
+    public function api_list_custom_fonts($request) {
+        $fonts = get_posts([
+            'post_type'      => 'bricks_fonts',
+            'posts_per_page' => -1,
+            'post_status'    => ['publish', 'draft', 'private'],
+        ]);
+        $out = [];
+        foreach ($fonts as $font) {
+            $faces = get_post_meta($font->ID, 'bricks_font_face_rules', true);
+            $out[] = [
+                'id'         => $font->ID,
+                'name'       => $font->post_title,
+                'fontFamily' => get_post_meta($font->ID, 'font_family', true) ?: $font->post_title,
+                'faces'      => $faces ?: [],
+                'status'     => $font->post_status,
+            ];
+        }
+        return ['success' => true, 'count' => count($out), 'fonts' => $out];
+    }
+
+    /**
+     * POST /register-custom-font — Enregistre une custom font dans Bricks Font Manager.
+     * Params :
+     *   - name (str) : nom interne (ex: "Anton")
+     *   - fontFamily (str) : font-family CSS (ex: "Anton")
+     *   - faces (array) : liste de variantes [{ weight: 400, style: "normal", url: "https://.../anton-regular.woff2" }]
+     */
+    public function api_register_custom_font($request) {
+        $name = sanitize_text_field($request->get_param('name'));
+        $font_family = sanitize_text_field($request->get_param('fontFamily'));
+        $faces = $request->get_param('faces');
+        if (empty($name)) {
+            return new WP_Error('missing_name', 'name est requis', ['status' => 400]);
+        }
+        if (empty($font_family)) {
+            $font_family = $name;
+        }
+        if (!is_array($faces) || empty($faces)) {
+            return new WP_Error('missing_faces', 'faces (array) est requis avec au moins une variante', ['status' => 400]);
+        }
+
+        $font_id = wp_insert_post([
+            'post_type'   => 'bricks_fonts',
+            'post_title'  => $name,
+            'post_status' => 'publish',
+        ], true);
+        if (is_wp_error($font_id)) {
+            return new WP_Error('insert_failed', $font_id->get_error_message(), ['status' => 500]);
+        }
+
+        update_post_meta($font_id, 'font_family', $font_family);
+        update_post_meta($font_id, 'bricks_font_face_rules', $faces);
+
+        return [
+            'success'    => true,
+            'id'         => $font_id,
+            'name'       => $name,
+            'fontFamily' => $font_family,
+            'facesCount' => count($faces),
+            'message'    => "Font '{$font_family}' enregistrée dans Bricks Font Manager",
+        ];
+    }
+
+    /**
+     * POST /delete-custom-font — Supprime une custom font.
+     * Params : id (int)
+     */
+    public function api_delete_custom_font($request) {
+        $id = (int) $request->get_param('id');
+        if (empty($id)) {
+            return new WP_Error('missing_id', 'id est requis', ['status' => 400]);
+        }
+        $post = get_post($id);
+        if (!$post || $post->post_type !== 'bricks_fonts') {
+            return new WP_Error('not_a_font', "L'id {$id} n'est pas une bricks_fonts", ['status' => 404]);
+        }
+        $name = $post->post_title;
+        wp_delete_post($id, true);
+        return ['success' => true, 'id' => $id, 'name' => $name, 'message' => "Custom font '{$name}' supprimée"];
+    }
+
+    /**
+     * POST /register-google-font-locally — Télécharge un Google Font et l'enregistre dans Bricks Font Manager.
+     * Params :
+     *   - name (str) : nom de la font Google (ex: "Anton", "Inter")
+     *   - weights (array) : poids souhaités, par défaut [400] (ex: [400, 700, 900])
+     */
+    public function api_register_google_font_locally($request) {
+        $name = sanitize_text_field($request->get_param('name'));
+        $weights = $request->get_param('weights');
+        if (!is_array($weights) || empty($weights)) {
+            $weights = [400];
+        }
+        if (empty($name)) {
+            return new WP_Error('missing_name', 'name est requis (ex: "Anton")', ['status' => 400]);
+        }
+
+        // 1. Construire l'URL Google Fonts CSS
+        $weight_str = implode(';', array_map('intval', $weights));
+        $css_url = "https://fonts.googleapis.com/css2?family=" . rawurlencode($name) . ":wght@{$weight_str}&display=swap";
+
+        // 2. Récupérer le CSS
+        $response = wp_remote_get($css_url, [
+            'timeout' => 30,
+            'headers' => ['User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'],
+        ]);
+        if (is_wp_error($response)) {
+            return new WP_Error('fetch_failed', 'Impossible de récupérer le CSS Google : ' . $response->get_error_message(), ['status' => 502]);
+        }
+        $css = wp_remote_retrieve_body($response);
+        if (empty($css)) {
+            return new WP_Error('empty_css', 'CSS Google vide — la font existe-t-elle ?', ['status' => 404]);
+        }
+
+        // 3. Parser les @font-face pour extraire les URLs woff2
+        preg_match_all('/@font-face\s*\{[^}]+\}/s', $css, $blocks);
+        $faces = [];
+        foreach ($blocks[0] as $block) {
+            preg_match('/font-weight:\s*([0-9]+)/', $block, $m_w);
+            preg_match('/font-style:\s*(\w+)/', $block, $m_s);
+            preg_match('/url\((https:\/\/[^)]+\.woff2)\)/', $block, $m_u);
+            if (!empty($m_u[1])) {
+                $faces[] = [
+                    'weight' => $m_w[1] ?? '400',
+                    'style'  => $m_s[1] ?? 'normal',
+                    'url'    => $m_u[1],
+                ];
+            }
+        }
+
+        if (empty($faces)) {
+            return new WP_Error('no_faces', 'Aucun fichier woff2 trouvé dans le CSS Google', ['status' => 404]);
+        }
+
+        // 4. Créer la custom font dans Bricks
+        $font_id = wp_insert_post([
+            'post_type'   => 'bricks_fonts',
+            'post_title'  => $name,
+            'post_status' => 'publish',
+        ], true);
+        if (is_wp_error($font_id)) {
+            return new WP_Error('insert_failed', $font_id->get_error_message(), ['status' => 500]);
+        }
+        update_post_meta($font_id, 'font_family', $name);
+        update_post_meta($font_id, 'bricks_font_face_rules', $faces);
+
+        return [
+            'success'    => true,
+            'id'         => $font_id,
+            'name'       => $name,
+            'facesCount' => count($faces),
+            'faces'      => $faces,
+            'message'    => "Google Font '{$name}' enregistrée localement (URLs woff2 hébergées par Google, pas de download local)",
+            'note'       => 'Pour héberger localement les fichiers (mieux pour RGPD), il faut télécharger les .woff2 et les uploader. Les URLs ici pointent encore vers fonts.gstatic.com.',
+        ];
+    }
+
+    // ============================================================
+    // 🆕 v3.6 — PHASE B : GLOBAL CLASSES + THEME STYLES + PAGE CODE
+    // ============================================================
+
+    /**
+     * GET /list-global-classes — Liste les classes CSS globales Bricks.
+     */
+    public function api_list_global_classes($request) {
+        $classes = get_option('bricks_global_classes', []);
+        if (!is_array($classes)) $classes = [];
+        return ['success' => true, 'count' => count($classes), 'classes' => $classes];
+    }
+
+    /**
+     * POST /create-global-class — Crée une classe CSS globale Bricks.
+     * Params : name (str), settings (object) — settings Bricks à appliquer (ex: { _typography: ..., _padding: ... })
+     */
+    public function api_create_global_class($request) {
+        $name = sanitize_text_field($request->get_param('name'));
+        $settings = $request->get_param('settings');
+        if (empty($name)) {
+            return new WP_Error('missing_name', 'name est requis', ['status' => 400]);
+        }
+        if (!is_array($settings)) $settings = [];
+
+        $classes = get_option('bricks_global_classes', []);
+        if (!is_array($classes)) $classes = [];
+        $id = substr(md5(uniqid()), 0, 6);
+        $classes[] = [
+            'id'       => $id,
+            'name'     => $name,
+            'settings' => $settings,
+        ];
+        update_option('bricks_global_classes', $classes);
+        return ['success' => true, 'id' => $id, 'name' => $name, 'totalClasses' => count($classes), 'message' => "Classe '{$name}' créée"];
+    }
+
+    /**
+     * POST /update-global-class — Modifie une classe globale par id.
+     * Params : id (str), name (opt), settings (opt object)
+     */
+    public function api_update_global_class($request) {
+        $id = sanitize_text_field($request->get_param('id'));
+        if (empty($id)) {
+            return new WP_Error('missing_id', 'id est requis', ['status' => 400]);
+        }
+        $classes = get_option('bricks_global_classes', []);
+        if (!is_array($classes)) $classes = [];
+
+        $found = false;
+        foreach ($classes as &$cls) {
+            if (isset($cls['id']) && $cls['id'] === $id) {
+                $name = $request->get_param('name');
+                $settings = $request->get_param('settings');
+                if ($name !== null) $cls['name'] = sanitize_text_field($name);
+                if (is_array($settings)) $cls['settings'] = $settings;
+                $found = true;
+                break;
+            }
+        }
+        unset($cls);
+        if (!$found) {
+            return new WP_Error('not_found', "Classe id {$id} introuvable", ['status' => 404]);
+        }
+        update_option('bricks_global_classes', $classes);
+        return ['success' => true, 'id' => $id, 'message' => 'Classe mise à jour'];
+    }
+
+    /**
+     * POST /delete-global-class — Supprime une classe globale par id.
+     */
+    public function api_delete_global_class($request) {
+        $id = sanitize_text_field($request->get_param('id'));
+        if (empty($id)) {
+            return new WP_Error('missing_id', 'id est requis', ['status' => 400]);
+        }
+        $classes = get_option('bricks_global_classes', []);
+        if (!is_array($classes)) $classes = [];
+        $before = count($classes);
+        $classes = array_values(array_filter($classes, function ($c) use ($id) {
+            return !(isset($c['id']) && $c['id'] === $id);
+        }));
+        if (count($classes) === $before) {
+            return new WP_Error('not_found', "Classe id {$id} introuvable", ['status' => 404]);
+        }
+        update_option('bricks_global_classes', $classes);
+        return ['success' => true, 'id' => $id, 'remaining' => count($classes), 'message' => 'Classe supprimée'];
+    }
+
+    /**
+     * GET /list-theme-styles — Liste les theme styles Bricks.
+     */
+    public function api_list_theme_styles($request) {
+        $styles = get_option('bricks_theme_styles', []);
+        if (!is_array($styles)) $styles = [];
+        return ['success' => true, 'count' => count($styles), 'themeStyles' => $styles];
+    }
+
+    /**
+     * POST /create-theme-style — Crée un theme style Bricks.
+     * Params : name (str), settings (object), conditions (opt array)
+     */
+    public function api_create_theme_style($request) {
+        $name = sanitize_text_field($request->get_param('name'));
+        $settings = $request->get_param('settings');
+        $conditions = $request->get_param('conditions');
+        if (empty($name)) {
+            return new WP_Error('missing_name', 'name est requis', ['status' => 400]);
+        }
+        if (!is_array($settings)) $settings = [];
+
+        $styles = get_option('bricks_theme_styles', []);
+        if (!is_array($styles)) $styles = [];
+        $id = substr(md5(uniqid()), 0, 8);
+        $styles[$id] = [
+            'id'         => $id,
+            'name'       => $name,
+            'settings'   => $settings,
+            'conditions' => is_array($conditions) ? $conditions : [],
+        ];
+        update_option('bricks_theme_styles', $styles);
+        return ['success' => true, 'id' => $id, 'name' => $name, 'totalStyles' => count($styles), 'message' => "Theme style '{$name}' créé"];
+    }
+
+    /**
+     * POST /update-theme-style — Modifie un theme style.
+     */
+    public function api_update_theme_style($request) {
+        $id = sanitize_text_field($request->get_param('id'));
+        if (empty($id)) {
+            return new WP_Error('missing_id', 'id est requis', ['status' => 400]);
+        }
+        $styles = get_option('bricks_theme_styles', []);
+        if (!is_array($styles)) $styles = [];
+        if (!isset($styles[$id])) {
+            return new WP_Error('not_found', "Theme style id {$id} introuvable", ['status' => 404]);
+        }
+        $name = $request->get_param('name');
+        $settings = $request->get_param('settings');
+        $conditions = $request->get_param('conditions');
+        if ($name !== null) $styles[$id]['name'] = sanitize_text_field($name);
+        if (is_array($settings)) $styles[$id]['settings'] = $settings;
+        if (is_array($conditions)) $styles[$id]['conditions'] = $conditions;
+        update_option('bricks_theme_styles', $styles);
+        return ['success' => true, 'id' => $id, 'message' => 'Theme style mis à jour'];
+    }
+
+    /**
+     * POST /delete-theme-style — Supprime un theme style.
+     */
+    public function api_delete_theme_style($request) {
+        $id = sanitize_text_field($request->get_param('id'));
+        if (empty($id)) {
+            return new WP_Error('missing_id', 'id est requis', ['status' => 400]);
+        }
+        $styles = get_option('bricks_theme_styles', []);
+        if (!is_array($styles)) $styles = [];
+        if (!isset($styles[$id])) {
+            return new WP_Error('not_found', "Theme style id {$id} introuvable", ['status' => 404]);
+        }
+        unset($styles[$id]);
+        update_option('bricks_theme_styles', $styles);
+        return ['success' => true, 'id' => $id, 'remaining' => count($styles), 'message' => 'Theme style supprimé'];
+    }
+
+    /**
+     * POST /get-page-custom-code — Récupère le custom code (CSS/JS) d'une page Bricks.
+     * Stocké dans post meta '_bricks_page_settings' sous customCss/customScripts.
+     */
+    public function api_get_page_custom_code($request) {
+        $page_id = (int) $request->get_param('pageId');
+        if (empty($page_id)) {
+            return new WP_Error('missing_pageId', 'pageId est requis', ['status' => 400]);
+        }
+        $page_settings = get_post_meta($page_id, '_bricks_page_settings', true);
+        if (!is_array($page_settings)) $page_settings = [];
+        return [
+            'success'              => true,
+            'pageId'               => $page_id,
+            'customCss'            => $page_settings['customCss'] ?? '',
+            'customScripts'        => $page_settings['customScripts'] ?? '',
+        ];
+    }
+
+    /**
+     * POST /set-page-custom-code — Définit du CSS/JS spécifique à une page.
+     * Params : pageId (int), customCss (str opt), customScripts (str opt)
+     */
+    public function api_set_page_custom_code($request) {
+        $page_id = (int) $request->get_param('pageId');
+        if (empty($page_id)) {
+            return new WP_Error('missing_pageId', 'pageId est requis', ['status' => 400]);
+        }
+        $page = get_post($page_id);
+        if (!$page) {
+            return new WP_Error('not_found', "Page {$page_id} introuvable", ['status' => 404]);
+        }
+
+        $page_settings = get_post_meta($page_id, '_bricks_page_settings', true);
+        if (!is_array($page_settings)) $page_settings = [];
+
+        $changed = [];
+        $css = $request->get_param('customCss');
+        $js  = $request->get_param('customScripts');
+        if ($css !== null) { $page_settings['customCss'] = (string) $css; $changed[] = 'customCss'; }
+        if ($js  !== null) { $page_settings['customScripts'] = (string) $js;  $changed[] = 'customScripts'; }
+
+        if (empty($changed)) {
+            return new WP_Error('no_changes', 'Aucun champ fourni (customCss, customScripts)', ['status' => 400]);
+        }
+
+        delete_post_meta($page_id, '_bricks_page_settings');
+        add_post_meta($page_id, '_bricks_page_settings', $page_settings, true);
+
+        return ['success' => true, 'pageId' => $page_id, 'updated' => $changed, 'message' => 'Custom code de la page mis à jour'];
+    }
+
+    // ============================================================
+    // 🆕 v3.6 — PHASE C : STYLE MANAGER 2.2 + COMPONENTS
+    // ============================================================
+
+    /**
+     * GET /list-typography-scales — Liste les typography scales (Bricks 2.2 Style Manager).
+     */
+    public function api_list_typography_scales($request) {
+        $scales = get_option('bricks_typography_scales', []);
+        if (!is_array($scales)) $scales = [];
+        return ['success' => true, 'count' => count($scales), 'scales' => $scales];
+    }
+
+    /**
+     * POST /set-typography-scale — Définit/met à jour une typography scale.
+     * Params : id (str), name (str), values (object) — ex: { h1: "64px", h2: "48px", body: "16px" }
+     */
+    public function api_set_typography_scale($request) {
+        $id = sanitize_text_field($request->get_param('id'));
+        $name = sanitize_text_field($request->get_param('name'));
+        $values = $request->get_param('values');
+        if (empty($id)) $id = substr(md5(uniqid()), 0, 8);
+        if (empty($name)) $name = 'Scale ' . $id;
+        if (!is_array($values)) $values = [];
+
+        $scales = get_option('bricks_typography_scales', []);
+        if (!is_array($scales)) $scales = [];
+        $scales[$id] = ['id' => $id, 'name' => $name, 'values' => $values];
+        update_option('bricks_typography_scales', $scales);
+        return ['success' => true, 'id' => $id, 'name' => $name, 'totalScales' => count($scales), 'message' => "Typography scale '{$name}' enregistrée"];
+    }
+
+    /**
+     * GET /list-spacing-scales — Liste les spacing scales (Bricks 2.2).
+     */
+    public function api_list_spacing_scales($request) {
+        $scales = get_option('bricks_spacing_scales', []);
+        if (!is_array($scales)) $scales = [];
+        return ['success' => true, 'count' => count($scales), 'scales' => $scales];
+    }
+
+    /**
+     * POST /set-spacing-scale — Définit/met à jour une spacing scale.
+     * Params : id (str), name (str), values (object) — ex: { xs: "8px", sm: "16px", md: "24px", lg: "48px" }
+     */
+    public function api_set_spacing_scale($request) {
+        $id = sanitize_text_field($request->get_param('id'));
+        $name = sanitize_text_field($request->get_param('name'));
+        $values = $request->get_param('values');
+        if (empty($id)) $id = substr(md5(uniqid()), 0, 8);
+        if (empty($name)) $name = 'Scale ' . $id;
+        if (!is_array($values)) $values = [];
+
+        $scales = get_option('bricks_spacing_scales', []);
+        if (!is_array($scales)) $scales = [];
+        $scales[$id] = ['id' => $id, 'name' => $name, 'values' => $values];
+        update_option('bricks_spacing_scales', $scales);
+        return ['success' => true, 'id' => $id, 'name' => $name, 'totalScales' => count($scales), 'message' => "Spacing scale '{$name}' enregistrée"];
+    }
+
+    /**
+     * GET /list-css-variables — Liste les CSS variables globales (Bricks 2.2).
+     */
+    public function api_list_css_variables($request) {
+        $vars = get_option('bricks_css_variables', []);
+        if (!is_array($vars)) $vars = [];
+        return ['success' => true, 'count' => count($vars), 'variables' => $vars];
+    }
+
+    /**
+     * POST /set-css-variable — Crée/modifie une CSS variable globale.
+     * Params : name (str, ex: "--primary"), value (str, ex: "#FD5B2C")
+     */
+    public function api_set_css_variable($request) {
+        $name = sanitize_text_field($request->get_param('name'));
+        $value = sanitize_text_field($request->get_param('value'));
+        if (empty($name)) {
+            return new WP_Error('missing_name', 'name est requis (ex: "--primary")', ['status' => 400]);
+        }
+        if (strpos($name, '--') !== 0) {
+            $name = '--' . $name;
+        }
+
+        $vars = get_option('bricks_css_variables', []);
+        if (!is_array($vars)) $vars = [];
+
+        $found = false;
+        foreach ($vars as &$v) {
+            if (isset($v['name']) && $v['name'] === $name) {
+                $v['value'] = $value;
+                $found = true;
+                break;
+            }
+        }
+        unset($v);
+        if (!$found) {
+            $vars[] = ['id' => substr(md5(uniqid()), 0, 6), 'name' => $name, 'value' => $value];
+        }
+        update_option('bricks_css_variables', $vars);
+        return ['success' => true, 'name' => $name, 'value' => $value, 'totalVariables' => count($vars), 'message' => "CSS variable '{$name}' enregistrée"];
+    }
+
+    /**
+     * GET /list-components — Liste les components Bricks (templates avec type=component).
+     * Stockés dans le CPT bricks_template avec post meta _bricks_template_type='component'.
+     */
+    public function api_list_components($request) {
+        $components = get_posts([
+            'post_type'      => 'bricks_template',
+            'posts_per_page' => -1,
+            'meta_key'       => '_bricks_template_type',
+            'meta_value'     => 'component',
+            'post_status'    => ['publish', 'draft', 'private'],
+        ]);
+        $out = [];
+        foreach ($components as $cmp) {
+            $out[] = [
+                'id'       => $cmp->ID,
+                'name'     => $cmp->post_title,
+                'slug'     => $cmp->post_name,
+                'modified' => $cmp->post_modified,
+                'status'   => $cmp->post_status,
+            ];
+        }
+        return ['success' => true, 'count' => count($out), 'components' => $out];
     }
 
     /**

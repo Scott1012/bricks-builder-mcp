@@ -118,8 +118,9 @@ Quand tu attaques une tâche Bricks, **consulte le fichier de référence approp
 
 | Besoin | Fichier à lire |
 |---|---|
+| **🆕 API native Bricks** (Custom Code, Fonts, Theme Styles, Global Classes, Code Execution, etc.) — où chaque chose est en DB et avec quel outil MCP la piloter | `references/bricks-native-api.md` ⭐ |
 | Snippets JSON prêts à l'emploi (CTA, hero, container, grid, image) | `references/cheat-sheet.md` |
-| Doc complète des 11 outils MCP + Playwright + Screenshot | `references/outils-mcp.md` |
+| Doc complète des outils MCP + Playwright + Screenshot | `references/outils-mcp.md` |
 | Patterns techniques (color, typography, flexbox, grid, etc.) + catalogue modules | `references/patterns.md` |
 | 10 pièges fréquents avec solutions testées | `references/pitfalls.md` |
 | Méthodologie complète (workflow, vérifications, économie tokens) | `references/workflow.md` |
