@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.3.1
+ * Version: 3.3.2
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.3.1');
+define('BRICKS_MCP_VERSION', '3.3.2');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -241,13 +241,19 @@ class BricksMCPServer {
 
     public function api_list_pages($request) {
         $args = [
-            'post_type' => 'page',
+            'post_type'      => 'page',
             'posts_per_page' => -1,
-            'meta_key' => '_bricks_page_content_2',
-            'orderby' => 'title',
-            'order' => 'ASC',
+            'orderby'        => 'title',
+            'order'          => 'ASC',
             // v3.3.1 — Inclure aussi les drafts et private (pas seulement publish par défaut)
-            'post_status' => ['publish', 'draft', 'private', 'pending']
+            'post_status'    => ['publish', 'draft', 'private', 'pending'],
+            // v3.3.2 — meta_query avec EXISTS explicite pour matcher même les valeurs vides
+            'meta_query'     => [
+                [
+                    'key'     => '_bricks_page_content_2',
+                    'compare' => 'EXISTS',
+                ],
+            ],
         ];
 
         $pages = get_posts($args);
@@ -819,9 +825,20 @@ class BricksMCPServer {
 
         // Activer Bricks Builder sur cette page
         // Le meta _bricks_editor_mode = 'bricks' active Bricks
-        // Le meta _bricks_page_content_2 = '[]' initialise un contenu Bricks vide
+        // Le meta _bricks_page_content_2 doit avoir une valeur non-vide pour être matché
+        // par meta_query EXISTS sur certaines configs WP. v3.3.2 — on initialise avec
+        // une section vide minimale au lieu d'un tableau vide.
         update_post_meta($page_id, '_bricks_editor_mode', 'bricks');
-        update_post_meta($page_id, '_bricks_page_content_2', []);
+        $initial_content = [
+            [
+                'id'       => substr(md5(uniqid()), 0, 6),
+                'name'     => 'section',
+                'parent'   => 0,
+                'children' => [],
+                'settings' => [],
+            ],
+        ];
+        update_post_meta($page_id, '_bricks_page_content_2', $initial_content);
 
         // Si demandé, configurer comme page d'accueil
         $is_homepage = false;
