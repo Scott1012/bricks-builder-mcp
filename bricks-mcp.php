@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.3.0
+ * Version: 3.3.1
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.3.0');
+define('BRICKS_MCP_VERSION', '3.3.1');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -245,7 +245,9 @@ class BricksMCPServer {
             'posts_per_page' => -1,
             'meta_key' => '_bricks_page_content_2',
             'orderby' => 'title',
-            'order' => 'ASC'
+            'order' => 'ASC',
+            // v3.3.1 — Inclure aussi les drafts et private (pas seulement publish par défaut)
+            'post_status' => ['publish', 'draft', 'private', 'pending']
         ];
 
         $pages = get_posts($args);
