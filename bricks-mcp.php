@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: Bricks Builder MCP Server
- * Plugin URI: https://github.com/mathieu-maap/bricks-builder-mcp
+ * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
  * Version: 3.3.0
  * Author: Mathieu Maap
@@ -18,7 +18,7 @@ define('BRICKS_MCP_VERSION', '3.3.0');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
-define('BRICKS_MCP_DEFAULT_GITHUB_REPO', 'https://github.com/mathieu-maap/bricks-builder-mcp/');
+define('BRICKS_MCP_DEFAULT_GITHUB_REPO', 'https://github.com/Scott1012/bricks-builder-mcp/');
 
 class BricksMCPServer {
     private static $instance = null;
@@ -990,7 +990,7 @@ class BricksMCPServer {
                     <form method="post" style="margin-top:12px;">
                         <?php wp_nonce_field('bricks_mcp_save_github_repo'); ?>
                         <input type="url" name="github_repo" value="<?php echo esc_attr($github_repo); ?>" class="regular-text" style="width:100%;max-width:600px;">
-                        <p class="description">URL du repo GitHub où sont publiées les Releases (ex: <code>https://github.com/mathieu-maap/bricks-builder-mcp/</code>).</p>
+                        <p class="description">URL du repo GitHub où sont publiées les Releases (ex: <code>https://github.com/Scott1012/bricks-builder-mcp/</code>).</p>
                         <button type="submit" name="save_github_repo" class="button">Enregistrer l'URL</button>
                     </form>
                 </details>
