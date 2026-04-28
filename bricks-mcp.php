@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.3.4
+ * Version: 3.5.0
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.3.4');
+define('BRICKS_MCP_VERSION', '3.5.0');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -214,6 +214,80 @@ class BricksMCPServer {
         register_rest_route($namespace, '/create-page', [
             'methods' => 'POST',
             'callback' => [$this, 'api_create_page'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+
+        // 🆕 v3.4 — Gestion avancée des pages
+        register_rest_route($namespace, '/delete-page', [
+            'methods' => 'POST',
+            'callback' => [$this, 'api_delete_page'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/update-page-meta', [
+            'methods' => 'POST',
+            'callback' => [$this, 'api_update_page_meta'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/duplicate-page', [
+            'methods' => 'POST',
+            'callback' => [$this, 'api_duplicate_page'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/set-homepage', [
+            'methods' => 'POST',
+            'callback' => [$this, 'api_set_homepage'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+
+        // 🆕 v3.5 — Health check, médias, menus, styles globaux
+        register_rest_route($namespace, '/health', [
+            'methods' => 'GET',
+            'callback' => [$this, 'api_health'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/list-all-pages', [
+            'methods' => 'GET',
+            'callback' => [$this, 'api_list_all_pages'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/upload-media', [
+            'methods' => 'POST',
+            'callback' => [$this, 'api_upload_media'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/list-media', [
+            'methods' => 'POST',
+            'callback' => [$this, 'api_list_media'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/list-menus', [
+            'methods' => 'GET',
+            'callback' => [$this, 'api_list_menus'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/add-menu-item', [
+            'methods' => 'POST',
+            'callback' => [$this, 'api_add_menu_item'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/get-global-styles', [
+            'methods' => 'GET',
+            'callback' => [$this, 'api_get_global_styles'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/update-global-styles', [
+            'methods' => 'POST',
+            'callback' => [$this, 'api_update_global_styles'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/list-color-palette', [
+            'methods' => 'GET',
+            'callback' => [$this, 'api_list_color_palette'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/add-color-to-palette', [
+            'methods' => 'POST',
+            'callback' => [$this, 'api_add_color_to_palette'],
             'permission_callback' => [$this, 'check_api_key']
         ]);
     }
@@ -857,6 +931,579 @@ class BricksMCPServer {
             'status'     => $status,
             'isHomepage' => $is_homepage,
             'message'    => "Page créée avec succès et activée en mode Bricks Builder",
+        ];
+    }
+
+    /**
+     * 🆕 v3.4 — Supprime une page WordPress.
+     * Endpoint POST /wp-json/bricks-mcp/v2/delete-page
+     *
+     * Params : pageId (requis), force (bool, default false)
+     *   - force=false : page mise à la corbeille (récupérable)
+     *   - force=true  : suppression définitive (irréversible)
+     */
+    public function api_delete_page($request) {
+        $page_id = (int) $request->get_param('pageId');
+        if (empty($page_id)) {
+            return new WP_Error('missing_pageId', 'Le paramètre "pageId" est requis', ['status' => 400]);
+        }
+
+        $page = get_post($page_id);
+        if (!$page || $page->post_type !== 'page') {
+            return new WP_Error('not_a_page', "Le post {$page_id} n'existe pas ou n'est pas une page", ['status' => 404]);
+        }
+
+        $force = (bool) $request->get_param('force');
+
+        // Si la page est définie comme page d'accueil, on ne la supprime pas — sécurité
+        $homepage_id = (int) get_option('page_on_front');
+        if ($page_id === $homepage_id) {
+            return new WP_Error('is_homepage', "Cette page est la page d'accueil. Change d'abord la page d'accueil avant de la supprimer.", ['status' => 409]);
+        }
+
+        $title = $page->post_title;
+        $result = wp_delete_post($page_id, $force);
+
+        if (!$result) {
+            return new WP_Error('delete_failed', "Erreur lors de la suppression de la page {$page_id}", ['status' => 500]);
+        }
+
+        return [
+            'success' => true,
+            'id'      => $page_id,
+            'title'   => $title,
+            'mode'    => $force ? 'definitive' : 'corbeille',
+            'message' => $force
+                ? "Page supprimée définitivement"
+                : "Page mise à la corbeille (récupérable depuis WP Admin → Pages → Corbeille)",
+        ];
+    }
+
+    /**
+     * 🆕 v3.4 — Met à jour les meta-données d'une page (titre, slug, statut, parent).
+     * Endpoint POST /wp-json/bricks-mcp/v2/update-page-meta
+     *
+     * Params : pageId (requis), title, slug, status, parentId (tous optionnels — seuls
+     * les champs fournis sont modifiés)
+     */
+    public function api_update_page_meta($request) {
+        $page_id = (int) $request->get_param('pageId');
+        if (empty($page_id)) {
+            return new WP_Error('missing_pageId', 'Le paramètre "pageId" est requis', ['status' => 400]);
+        }
+
+        $page = get_post($page_id);
+        if (!$page || $page->post_type !== 'page') {
+            return new WP_Error('not_a_page', "Le post {$page_id} n'existe pas ou n'est pas une page", ['status' => 404]);
+        }
+
+        $update_args = ['ID' => $page_id];
+        $changes = [];
+
+        $title = $request->get_param('title');
+        if ($title !== null && $title !== '') {
+            $update_args['post_title'] = sanitize_text_field($title);
+            $changes['title'] = $update_args['post_title'];
+        }
+
+        $slug = $request->get_param('slug');
+        if ($slug !== null && $slug !== '') {
+            $update_args['post_name'] = sanitize_title($slug);
+            $changes['slug'] = $update_args['post_name'];
+        }
+
+        $status = $request->get_param('status');
+        if ($status !== null && $status !== '') {
+            $allowed = ['publish', 'draft', 'private', 'pending'];
+            if (in_array($status, $allowed, true)) {
+                $update_args['post_status'] = $status;
+                $changes['status'] = $status;
+            }
+        }
+
+        $parent_id = $request->get_param('parentId');
+        if ($parent_id !== null) {
+            $update_args['post_parent'] = (int) $parent_id;
+            $changes['parentId'] = (int) $parent_id;
+        }
+
+        if (count($update_args) === 1) {
+            return new WP_Error('no_changes', 'Aucun champ à modifier fourni (title, slug, status, parentId).', ['status' => 400]);
+        }
+
+        $result = wp_update_post($update_args, true);
+        if (is_wp_error($result)) {
+            return new WP_Error('update_failed', 'Erreur lors de la mise à jour : ' . $result->get_error_message(), ['status' => 500]);
+        }
+
+        return [
+            'success' => true,
+            'id'      => $page_id,
+            'changes' => $changes,
+            'url'     => get_permalink($page_id),
+            'message' => 'Page mise à jour avec succès',
+        ];
+    }
+
+    /**
+     * 🆕 v3.4 — Duplique une page existante (titre, contenu Bricks, settings).
+     * Endpoint POST /wp-json/bricks-mcp/v2/duplicate-page
+     *
+     * Params :
+     *   - sourcePageId (requis) : ID de la page à dupliquer
+     *   - newTitle (optionnel)  : titre de la copie (défaut: "Copie de {original}")
+     *   - status (optionnel)    : 'publish' | 'draft' | 'private' (défaut: 'draft')
+     */
+    public function api_duplicate_page($request) {
+        $source_id = (int) $request->get_param('sourcePageId');
+        if (empty($source_id)) {
+            return new WP_Error('missing_sourcePageId', 'Le paramètre "sourcePageId" est requis', ['status' => 400]);
+        }
+
+        $source = get_post($source_id);
+        if (!$source || $source->post_type !== 'page') {
+            return new WP_Error('not_a_page', "La page source {$source_id} n'existe pas", ['status' => 404]);
+        }
+
+        $new_title = $request->get_param('newTitle');
+        if (empty($new_title)) {
+            $new_title = 'Copie de ' . $source->post_title;
+        } else {
+            $new_title = sanitize_text_field($new_title);
+        }
+
+        $status = $request->get_param('status') ?: 'draft';
+        $allowed_status = ['publish', 'draft', 'private', 'pending'];
+        if (!in_array($status, $allowed_status, true)) {
+            $status = 'draft';
+        }
+
+        // Créer la nouvelle page (sans le contenu, on copie via meta après)
+        $new_id = wp_insert_post([
+            'post_title'   => $new_title,
+            'post_content' => $source->post_content,
+            'post_status'  => $status,
+            'post_type'    => 'page',
+            'post_author'  => get_current_user_id() ?: $source->post_author,
+        ], true);
+
+        if (is_wp_error($new_id)) {
+            return new WP_Error('duplicate_failed', 'Erreur lors de la duplication : ' . $new_id->get_error_message(), ['status' => 500]);
+        }
+
+        // Copier le contenu Bricks (le meta principal)
+        $bricks_content = get_post_meta($source_id, '_bricks_page_content_2', true);
+        delete_post_meta($new_id, '_bricks_editor_mode');
+        add_post_meta($new_id, '_bricks_editor_mode', 'bricks', true);
+        delete_post_meta($new_id, '_bricks_page_content_2');
+        add_post_meta($new_id, '_bricks_page_content_2', $bricks_content ?: [], true);
+
+        // Copier les autres meta Bricks éventuels (settings de page, header/footer override, etc.)
+        $bricks_metas = ['_bricks_page_settings', '_bricks_page_header', '_bricks_page_footer'];
+        foreach ($bricks_metas as $meta_key) {
+            $value = get_post_meta($source_id, $meta_key, true);
+            if (!empty($value)) {
+                delete_post_meta($new_id, $meta_key);
+                add_post_meta($new_id, $meta_key, $value, true);
+            }
+        }
+
+        return [
+            'success'      => true,
+            'id'           => $new_id,
+            'title'        => $new_title,
+            'url'          => get_permalink($new_id),
+            'status'       => $status,
+            'sourcePageId' => $source_id,
+            'message'      => "Page dupliquée depuis '{$source->post_title}' (avec son contenu Bricks)",
+        ];
+    }
+
+    /**
+     * 🆕 v3.4 — Définit une page comme page d'accueil du site.
+     * Endpoint POST /wp-json/bricks-mcp/v2/set-homepage
+     *
+     * Params :
+     *   - pageId (requis) : ID de la page à mettre comme accueil
+     *   - reset (optionnel) : si true, remet l'accueil sur les derniers articles
+     */
+    public function api_set_homepage($request) {
+        $reset = (bool) $request->get_param('reset');
+
+        if ($reset) {
+            update_option('show_on_front', 'posts');
+            delete_option('page_on_front');
+            return [
+                'success' => true,
+                'message' => "Page d'accueil réinitialisée sur les derniers articles",
+            ];
+        }
+
+        $page_id = (int) $request->get_param('pageId');
+        if (empty($page_id)) {
+            return new WP_Error('missing_pageId', 'Le paramètre "pageId" est requis (ou reset=true pour reset)', ['status' => 400]);
+        }
+
+        $page = get_post($page_id);
+        if (!$page || $page->post_type !== 'page') {
+            return new WP_Error('not_a_page', "La page {$page_id} n'existe pas", ['status' => 404]);
+        }
+
+        if ($page->post_status !== 'publish') {
+            return new WP_Error('not_published', "La page {$page_id} doit être publiée pour être page d'accueil", ['status' => 409]);
+        }
+
+        update_option('show_on_front', 'page');
+        update_option('page_on_front', $page_id);
+
+        return [
+            'success' => true,
+            'id'      => $page_id,
+            'title'   => $page->post_title,
+            'url'     => get_permalink($page_id),
+            'message' => "'{$page->post_title}' est maintenant la page d'accueil du site",
+        ];
+    }
+
+    // ============================================================
+    // 🆕 v3.5 — HEALTH, MÉDIAS, MENUS, STYLES GLOBAUX
+    // ============================================================
+
+    /**
+     * Endpoint GET /health — Test de connexion + infos système.
+     * Utile pour debug : vérifier qu'on parle bien au bon site, version active, etc.
+     */
+    public function api_health($request) {
+        global $wp_version;
+        $bricks_active = false;
+        $bricks_version = null;
+        if (defined('BRICKS_VERSION')) {
+            $bricks_active = true;
+            $bricks_version = BRICKS_VERSION;
+        } elseif (function_exists('is_plugin_active') && is_plugin_active('bricks/bricks.php')) {
+            $bricks_active = true;
+        }
+
+        return [
+            'success'        => true,
+            'plugin_version' => BRICKS_MCP_VERSION,
+            'wp_version'     => $wp_version,
+            'php_version'    => PHP_VERSION,
+            'bricks_active'  => $bricks_active,
+            'bricks_version' => $bricks_version,
+            'site_name'      => get_bloginfo('name'),
+            'site_url'       => home_url(),
+            'is_multisite'   => is_multisite(),
+            'timestamp'      => current_time('mysql'),
+        ];
+    }
+
+    /**
+     * Endpoint GET /list-all-pages — Toutes les pages WP, pas seulement celles avec meta Bricks.
+     * Utile pour voir l'inventaire complet avant de créer/dupliquer.
+     */
+    public function api_list_all_pages($request) {
+        $pages = get_posts([
+            'post_type'      => 'page',
+            'posts_per_page' => -1,
+            'orderby'        => 'menu_order title',
+            'order'          => 'ASC',
+            'post_status'    => ['publish', 'draft', 'private', 'pending'],
+        ]);
+
+        $homepage_id = (int) get_option('page_on_front');
+        $data = [];
+        foreach ($pages as $page) {
+            $has_bricks = !empty(get_post_meta($page->ID, '_bricks_page_content_2', true));
+            $data[] = [
+                'id'           => $page->ID,
+                'title'        => $page->post_title,
+                'slug'         => $page->post_name,
+                'url'          => get_permalink($page->ID),
+                'status'       => $page->post_status,
+                'parent'       => $page->post_parent,
+                'is_homepage'  => $page->ID === $homepage_id,
+                'has_bricks'   => $has_bricks,
+                'modified'     => $page->post_modified,
+            ];
+        }
+        return $data;
+    }
+
+    /**
+     * Endpoint POST /upload-media — Upload une image dans la médiathèque depuis URL.
+     * Params : sourceUrl (requis), title, alt, caption (opt)
+     */
+    public function api_upload_media($request) {
+        $source_url = esc_url_raw($request->get_param('sourceUrl'));
+        if (empty($source_url)) {
+            return new WP_Error('missing_url', 'sourceUrl est requis', ['status' => 400]);
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        // Télécharger le fichier dans le tmp
+        $tmp = download_url($source_url, 60);
+        if (is_wp_error($tmp)) {
+            return new WP_Error('download_failed', 'Impossible de télécharger : ' . $tmp->get_error_message(), ['status' => 500]);
+        }
+
+        // Détecter le nom de fichier
+        $filename = basename(parse_url($source_url, PHP_URL_PATH));
+        if (empty($filename) || !preg_match('/\.(jpg|jpeg|png|gif|webp|svg)$/i', $filename)) {
+            $filename = 'upload-' . time() . '.jpg';
+        }
+
+        $file_array = [
+            'name'     => $filename,
+            'tmp_name' => $tmp,
+        ];
+
+        $attachment_id = media_handle_sideload($file_array, 0);
+        if (is_wp_error($attachment_id)) {
+            @unlink($tmp);
+            return new WP_Error('sideload_failed', 'Erreur upload : ' . $attachment_id->get_error_message(), ['status' => 500]);
+        }
+
+        // Méta optionnels
+        $title   = $request->get_param('title');
+        $alt     = $request->get_param('alt');
+        $caption = $request->get_param('caption');
+        if (!empty($title)) {
+            wp_update_post(['ID' => $attachment_id, 'post_title' => sanitize_text_field($title)]);
+        }
+        if (!empty($alt)) {
+            update_post_meta($attachment_id, '_wp_attachment_image_alt', sanitize_text_field($alt));
+        }
+        if (!empty($caption)) {
+            wp_update_post(['ID' => $attachment_id, 'post_excerpt' => sanitize_text_field($caption)]);
+        }
+
+        return [
+            'success'   => true,
+            'id'        => $attachment_id,
+            'url'       => wp_get_attachment_url($attachment_id),
+            'filename'  => $filename,
+            'sourceUrl' => $source_url,
+            'message'   => 'Image uploadée dans la médiathèque',
+        ];
+    }
+
+    /**
+     * Endpoint POST /list-media — Liste des médias paginée.
+     * Params : page (default 1), perPage (default 20), search (opt)
+     */
+    public function api_list_media($request) {
+        $page    = max(1, (int) $request->get_param('page') ?: 1);
+        $perPage = max(1, min(100, (int) $request->get_param('perPage') ?: 20));
+        $search  = $request->get_param('search');
+
+        $args = [
+            'post_type'      => 'attachment',
+            'post_status'    => 'inherit',
+            'posts_per_page' => $perPage,
+            'paged'          => $page,
+            'orderby'        => 'date',
+            'order'          => 'DESC',
+        ];
+        if (!empty($search)) {
+            $args['s'] = sanitize_text_field($search);
+        }
+
+        $query = new WP_Query($args);
+        $items = [];
+        foreach ($query->posts as $att) {
+            $items[] = [
+                'id'        => $att->ID,
+                'title'     => $att->post_title,
+                'filename'  => basename(get_attached_file($att->ID)),
+                'url'       => wp_get_attachment_url($att->ID),
+                'mime_type' => $att->post_mime_type,
+                'alt'       => get_post_meta($att->ID, '_wp_attachment_image_alt', true),
+                'date'      => $att->post_date,
+            ];
+        }
+
+        return [
+            'items'      => $items,
+            'total'      => (int) $query->found_posts,
+            'page'       => $page,
+            'perPage'    => $perPage,
+            'totalPages' => (int) $query->max_num_pages,
+        ];
+    }
+
+    /**
+     * Endpoint GET /list-menus — Liste les menus de navigation.
+     */
+    public function api_list_menus($request) {
+        $menus = wp_get_nav_menus();
+        $data = [];
+        foreach ($menus as $menu) {
+            $items = wp_get_nav_menu_items($menu->term_id);
+            $data[] = [
+                'id'         => $menu->term_id,
+                'name'       => $menu->name,
+                'slug'       => $menu->slug,
+                'item_count' => is_array($items) ? count($items) : 0,
+                'locations'  => array_keys(array_filter(get_nav_menu_locations(), function ($id) use ($menu) {
+                    return (int) $id === (int) $menu->term_id;
+                })),
+            ];
+        }
+        return $data;
+    }
+
+    /**
+     * Endpoint POST /add-menu-item — Ajoute un item à un menu.
+     * Params :
+     *   - menuId (requis)
+     *   - pageId (optionnel, pour lier à une page WP)
+     *   - customUrl + label (optionnel, pour un lien custom)
+     *   - parentItemId (optionnel)
+     */
+    public function api_add_menu_item($request) {
+        $menu_id = (int) $request->get_param('menuId');
+        if (empty($menu_id)) {
+            return new WP_Error('missing_menuId', 'menuId est requis', ['status' => 400]);
+        }
+        $menu = wp_get_nav_menu_object($menu_id);
+        if (!$menu) {
+            return new WP_Error('menu_not_found', "Menu {$menu_id} introuvable", ['status' => 404]);
+        }
+
+        $page_id      = (int) $request->get_param('pageId');
+        $custom_url   = $request->get_param('customUrl');
+        $label        = $request->get_param('label');
+        $parent_id    = (int) $request->get_param('parentItemId');
+
+        $item_args = ['menu-item-status' => 'publish'];
+
+        if ($page_id > 0) {
+            $page = get_post($page_id);
+            if (!$page || $page->post_type !== 'page') {
+                return new WP_Error('not_a_page', "Page {$page_id} introuvable", ['status' => 404]);
+            }
+            $item_args['menu-item-object-id'] = $page_id;
+            $item_args['menu-item-object']    = 'page';
+            $item_args['menu-item-type']      = 'post_type';
+            $item_args['menu-item-title']     = $label ?: $page->post_title;
+        } elseif (!empty($custom_url)) {
+            $item_args['menu-item-url']    = esc_url_raw($custom_url);
+            $item_args['menu-item-title']  = $label ?: $custom_url;
+            $item_args['menu-item-type']   = 'custom';
+        } else {
+            return new WP_Error('missing_target', 'Fournir pageId ou customUrl+label', ['status' => 400]);
+        }
+
+        if ($parent_id > 0) {
+            $item_args['menu-item-parent-id'] = $parent_id;
+        }
+
+        $item_id = wp_update_nav_menu_item($menu_id, 0, $item_args);
+        if (is_wp_error($item_id)) {
+            return new WP_Error('add_failed', $item_id->get_error_message(), ['status' => 500]);
+        }
+
+        return [
+            'success' => true,
+            'item_id' => $item_id,
+            'menu_id' => $menu_id,
+            'message' => "Item ajouté au menu '{$menu->name}'",
+        ];
+    }
+
+    /**
+     * Endpoint GET /get-global-styles — Récupère les settings globaux Bricks.
+     */
+    public function api_get_global_styles($request) {
+        return [
+            'success'           => true,
+            'global_settings'   => get_option('bricks_global_settings', []),
+            'color_palette'     => get_option('bricks_color_palette', []),
+            'global_classes'    => get_option('bricks_global_classes', []),
+            'theme_styles'      => get_option('bricks_theme_styles', []),
+        ];
+    }
+
+    /**
+     * Endpoint POST /update-global-styles — Met à jour les settings globaux.
+     * Params : settings (objet) — fusionné avec les settings existants.
+     */
+    public function api_update_global_styles($request) {
+        $settings = $request->get_param('settings');
+        if (!is_array($settings)) {
+            return new WP_Error('invalid_settings', 'settings doit être un objet', ['status' => 400]);
+        }
+
+        $existing = get_option('bricks_global_settings', []);
+        if (!is_array($existing)) {
+            $existing = [];
+        }
+        $merged = $this->array_merge_recursive_distinct($existing, $settings);
+        update_option('bricks_global_settings', $merged);
+
+        return [
+            'success'  => true,
+            'updated'  => array_keys($settings),
+            'message'  => 'Settings globaux Bricks mis à jour',
+        ];
+    }
+
+    /**
+     * Endpoint GET /list-color-palette — Récupère la palette de couleurs Bricks.
+     */
+    public function api_list_color_palette($request) {
+        $palette = get_option('bricks_color_palette', []);
+        if (!is_array($palette)) {
+            $palette = [];
+        }
+        return [
+            'success' => true,
+            'palette' => $palette,
+            'count'   => count($palette),
+        ];
+    }
+
+    /**
+     * Endpoint POST /add-color-to-palette — Ajoute une couleur à la palette.
+     * Params : name (requis), hex (requis ex: '#ff6b35')
+     */
+    public function api_add_color_to_palette($request) {
+        $name = sanitize_text_field($request->get_param('name'));
+        $hex  = sanitize_text_field($request->get_param('hex'));
+        if (empty($name) || empty($hex)) {
+            return new WP_Error('missing_params', 'name et hex sont requis', ['status' => 400]);
+        }
+        if (!preg_match('/^#?[0-9a-fA-F]{3,8}$/', $hex)) {
+            return new WP_Error('invalid_hex', 'hex doit être au format #ffffff', ['status' => 400]);
+        }
+        if (strpos($hex, '#') !== 0) {
+            $hex = '#' . $hex;
+        }
+
+        $palette = get_option('bricks_color_palette', []);
+        if (!is_array($palette)) {
+            $palette = [];
+        }
+
+        $color_id = substr(md5(uniqid()), 0, 6);
+        $palette[] = [
+            'id'    => $color_id,
+            'name'  => $name,
+            'raw'   => $hex,
+        ];
+        update_option('bricks_color_palette', $palette);
+
+        return [
+            'success'       => true,
+            'color_id'      => $color_id,
+            'name'          => $name,
+            'hex'           => $hex,
+            'palette_count' => count($palette),
+            'message'       => "Couleur '{$name}' ajoutée à la palette globale",
         ];
     }
 
