@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.3.2
+ * Version: 3.3.3
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.3.2');
+define('BRICKS_MCP_VERSION', '3.3.3');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -70,10 +70,10 @@ class BricksMCPServer {
                 'bricks-mcp-server'
             );
             $this->update_checker->setBranch('main');
-            // Active la lecture des releases GitHub (et pas juste le branch latest)
-            if (method_exists($this->update_checker->getVcsApi(), 'enableReleaseAssets')) {
-                $this->update_checker->getVcsApi()->enableReleaseAssets();
-            }
+            // v3.3.3 — On NE PAS appeler enableReleaseAssets() : ça force PUC à télécharger
+            // un asset zip qui doit être attaché à la release. Sans l'appel, PUC utilise
+            // le zip auto-généré GitHub du tag (qui marche tout seul, pas besoin d'attacher
+            // un fichier à la release manuellement).
         } catch (Exception $e) {
             // Silently fail si le repo est invalide
             $this->update_checker = null;
