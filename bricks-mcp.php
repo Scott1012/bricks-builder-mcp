@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.6.0
+ * Version: 3.6.1
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.6.0');
+define('BRICKS_MCP_VERSION', '3.6.1');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -1290,9 +1290,23 @@ class BricksMCPServer {
         }
 
         // Détecter le nom de fichier
-        $filename = basename(parse_url($source_url, PHP_URL_PATH));
-        if (empty($filename) || !preg_match('/\.(jpg|jpeg|png|gif|webp|svg)$/i', $filename)) {
-            $filename = 'upload-' . time() . '.jpg';
+        // v3.6.1 — Si title fourni, l'utiliser comme base du nom (slugifié) pour avoir des fichiers parlants
+        $title_for_name = $request->get_param('title');
+        $url_filename = basename(parse_url($source_url, PHP_URL_PATH));
+        // Détecter l'extension depuis l'URL (priorité) ou par défaut .jpg
+        $ext = 'jpg';
+        if (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)$/i', $url_filename, $m_ext)) {
+            $ext = strtolower($m_ext[1]);
+        } elseif (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)([?#]|$)/i', $source_url, $m_ext)) {
+            $ext = strtolower($m_ext[1]);
+        }
+
+        if (!empty($title_for_name)) {
+            $filename = sanitize_title($title_for_name) . '.' . $ext;
+        } elseif (!empty($url_filename) && preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)$/i', $url_filename)) {
+            $filename = $url_filename;
+        } else {
+            $filename = 'upload-' . time() . '.' . $ext;
         }
 
         $file_array = [
@@ -1822,10 +1836,13 @@ class BricksMCPServer {
         $weight_str = implode(';', array_map('intval', $weights));
         $css_url = "https://fonts.googleapis.com/css2?family=" . rawurlencode($name) . ":wght@{$weight_str}&display=swap";
 
-        // 2. Récupérer le CSS
+        // 2. Récupérer le CSS — UA Chrome complet IMPÉRATIF pour que Google serve des woff2
+        // (sans Chrome/X.X.X.X dans le UA, Google sert du .ttf qui ne match pas notre regex)
         $response = wp_remote_get($css_url, [
             'timeout' => 30,
-            'headers' => ['User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'],
+            'headers' => [
+                'User-Agent' => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            ],
         ]);
         if (is_wp_error($response)) {
             return new WP_Error('fetch_failed', 'Impossible de récupérer le CSS Google : ' . $response->get_error_message(), ['status' => 502]);
@@ -1835,24 +1852,40 @@ class BricksMCPServer {
             return new WP_Error('empty_css', 'CSS Google vide — la font existe-t-elle ?', ['status' => 404]);
         }
 
-        // 3. Parser les @font-face pour extraire les URLs woff2
+        // 3. Parser les @font-face pour extraire les URLs (priorité woff2 > woff > ttf)
         preg_match_all('/@font-face\s*\{[^}]+\}/s', $css, $blocks);
         $faces = [];
+        $seen = []; // déduplication par weight+style (Google sert une @font-face par range Unicode)
         foreach ($blocks[0] as $block) {
             preg_match('/font-weight:\s*([0-9]+)/', $block, $m_w);
             preg_match('/font-style:\s*(\w+)/', $block, $m_s);
-            preg_match('/url\((https:\/\/[^)]+\.woff2)\)/', $block, $m_u);
-            if (!empty($m_u[1])) {
+            // Capture .woff2 en priorité, sinon .woff, sinon .ttf
+            $url = null;
+            if (preg_match('/url\((https:\/\/[^)]+\.woff2)\)/', $block, $m_u)) {
+                $url = $m_u[1];
+            } elseif (preg_match('/url\((https:\/\/[^)]+\.woff)\)/', $block, $m_u)) {
+                $url = $m_u[1];
+            } elseif (preg_match('/url\((https:\/\/[^)]+\.ttf)\)/', $block, $m_u)) {
+                $url = $m_u[1];
+            }
+            if (!$url) continue;
+
+            $weight = $m_w[1] ?? '400';
+            $style  = $m_s[1] ?? 'normal';
+            $key = $weight . '|' . $style;
+            // Garder uniquement la première URL par weight+style (la "latin" qu'on prend en premier)
+            if (!isset($seen[$key])) {
+                $seen[$key] = true;
                 $faces[] = [
-                    'weight' => $m_w[1] ?? '400',
-                    'style'  => $m_s[1] ?? 'normal',
-                    'url'    => $m_u[1],
+                    'weight' => $weight,
+                    'style'  => $style,
+                    'url'    => $url,
                 ];
             }
         }
 
         if (empty($faces)) {
-            return new WP_Error('no_faces', 'Aucun fichier woff2 trouvé dans le CSS Google', ['status' => 404]);
+            return new WP_Error('no_faces', 'Aucun fichier de font (woff2/woff/ttf) trouvé dans le CSS Google. La font existe-t-elle bien ? Format CSS Google reçu : ' . substr($css, 0, 200), ['status' => 404]);
         }
 
         // 4. Créer la custom font dans Bricks
