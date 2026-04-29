@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.6.1
+ * Version: 3.6.2
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.6.1');
+define('BRICKS_MCP_VERSION', '3.6.2');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -599,9 +599,15 @@ class BricksMCPServer {
         $page_id = $request->get_param('pageId');
         $element_id = $request->get_param('elementId');
         $new_settings = $request->get_param('newSettings');
+        // v3.6.2 — paramètre optionnel `label` pour renommer l'élément dans la structure Bricks
+        $new_label = $request->get_param('label');
 
-        if (!$page_id || !$element_id || !$new_settings) {
-            return new WP_Error('missing_params', 'pageId, elementId et newSettings requis', ['status' => 400]);
+        if (!$page_id || !$element_id) {
+            return new WP_Error('missing_params', 'pageId et elementId requis', ['status' => 400]);
+        }
+        // newSettings peut être null si on veut juste mettre à jour le label
+        if (empty($new_settings) && $new_label === null) {
+            return new WP_Error('missing_params', 'Fournir newSettings ou label', ['status' => 400]);
         }
 
         $json_data = get_post_meta($page_id, '_bricks_page_content_2', true);
@@ -615,10 +621,16 @@ class BricksMCPServer {
         foreach ($json_data as &$element) {
             if (($element['id'] ?? '') === $element_id) {
                 // Fusionner les settings de manière récursive PROFONDE
-                if (!isset($element['settings'])) {
-                    $element['settings'] = [];
+                if (!empty($new_settings)) {
+                    if (!isset($element['settings'])) {
+                        $element['settings'] = [];
+                    }
+                    $element['settings'] = $this->array_merge_recursive_distinct($element['settings'], $new_settings);
                 }
-                $element['settings'] = $this->array_merge_recursive_distinct($element['settings'], $new_settings);
+                // v3.6.2 — Mise à jour du label (au niveau racine, hors settings)
+                if ($new_label !== null) {
+                    $element['label'] = sanitize_text_field($new_label);
+                }
                 $element_found = true;
                 break;
             }
