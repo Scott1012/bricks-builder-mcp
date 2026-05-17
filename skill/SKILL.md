@@ -17,7 +17,7 @@ Skill pour piloter **Bricks Builder** (page builder WordPress) via les outils MC
 - **Refonte** d'une page existante
 - **Debug** d'un comportement Bricks bizarre (élément invisible, gap qui ne s'applique pas, etc.)
 
-## Les 8 règles d'or (à respecter TOUJOURS)
+## Les 10 règles d'or (à respecter TOUJOURS)
 
 ### 1. Cloner un format qui marche avant d'inventer
 
@@ -81,6 +81,58 @@ Font Awesome, Google Fonts et autres assets externes chargent **1-2s après le D
 take_screenshot({ url, width: 1920, waitForMS: 2000 })
 ```
 
+### 9. ⭐ `verify_element` après CHAQUE batch_add / update significatif
+
+**Plus de "ça me semble bon"**. Après chaque section ou modification non-triviale, appelle :
+
+```js
+verify_element({pageId, elementId, viewport: "desktop"})
+// Retourne : screenshot crop + report {score, checks: [{ok, label, expected, got, hint}]}
+```
+
+L'outil :
+- Lance un browser headless (waitForMS: 2000 intégré)
+- Compare computed style vs settings attendus (gap, padding, typography, border-radius)
+- Détecte fonts non chargées, console errors, débordement horizontal, children manquants
+- Te montre une **image** (que tu peux voir) + un **report structuré** (que tu peux exploiter)
+
+**Workflow imposé** :
+```
+batch_add (1 section, ≤ 10 éléments)
+   ↓
+verify_element (le PARENT de la section)
+   ↓
+   ├─ score ≥ 9/10 → next section
+   └─ score < 9/10 → corriger avec les hints → re-verify
+```
+
+Détails et exemples : `references/verify-element.md`.
+
+### 10. ⭐ `report_missing_feature` si Bricks le fait mais MCP non
+
+**Avant d'inventer un workaround pour quelque chose que Bricks fait nativement** :
+
+1. Cherche dans `references/outils-mcp*.md` si un outil l'expose déjà
+2. Si pas trouvé, lis la doc officielle Bricks (`academy.bricksbuilder.io`)
+3. Si Bricks supporte nativement la feature ET aucun outil MCP ne l'expose / l'outil est buggy → **`report_missing_feature` AVANT de bricoler**
+
+```js
+report_missing_feature({
+  title: "Pas d'outil pour Interactions API",
+  bricksFeature: "Interactions API (event-based)",
+  bricksDocUrl: "https://academy.bricksbuilder.io/article/interactions/",
+  whatItShouldDo: "Ajouter trigger click + action show element à un bouton",
+  whatITried: "update_element avec _interactions: [...] — settings écrit mais Bricks ignore",
+  proposedTool: "set_element_interactions",
+  bricksVersion: "2.3.2",
+  context: "Page X, construction modal galerie"
+})
+```
+
+**À ne PAS reporter** : limites natives de Bricks (Bricks ne sait pas faire X). Dans ce cas, code librement une alternative (CSS keyframes, JS via `set_page_custom_code`).
+
+Détails : `references/feedback-system.md`.
+
 ## Workflow recommandé : PETIT → VÉRIFIER → SUIVANT
 
 ```
@@ -108,8 +160,10 @@ Que dois-je faire ?
 ├─ Créer section        → batch_add                  (~500)
 ├─ Réorganiser ordre    → reorder_sections           (~100)
 ├─ Refonte totale       → get_page_json + update     (~2500)
-├─ Vérifier rapide      → browser_evaluate (script JS)
-└─ Vérifier visuel      → screenshot avec waitForMS:2000
+├─ ⭐ Vérifier section   → verify_element            (image + report)
+├─ Vérifier rapide JS   → browser_evaluate (script JS)
+├─ Vérifier visuel full → screenshot avec waitForMS:2000
+└─ ⭐ Signaler un trou   → report_missing_feature    (si Bricks le fait mais MCP non)
 ```
 
 ## Index des references — où trouver quoi
@@ -118,13 +172,17 @@ Quand tu attaques une tâche Bricks, **consulte le fichier de référence approp
 
 | Besoin | Fichier à lire |
 |---|---|
-| **🆕 API native Bricks** (Custom Code, Fonts, Theme Styles, Global Classes, Code Execution, etc.) — où chaque chose est en DB et avec quel outil MCP la piloter | `references/bricks-native-api.md` ⭐ |
-| Snippets JSON prêts à l'emploi (CTA, hero, container, grid, image) | `references/cheat-sheet.md` |
-| Doc complète des outils MCP + Playwright + Screenshot | `references/outils-mcp.md` |
+| ⭐ **VERIFY ELEMENT** — workflow petit-à-petit-vérifier-petit-à-petit, comment lire le report, comment corriger les checks rouges | `references/verify-element.md` |
+| ⭐ **FEEDBACK SYSTEM** — quand et comment remonter un manque d'outil MCP (pas une limite Bricks) | `references/feedback-system.md` |
+| ⭐ **FORMATS BRICKS 2.3 validés en production** — À LIRE EN PREMIER pour ne pas refaire les erreurs des autres IA (border-radius, line-height, colors avec rgba/var, Google Fonts, etc.) | `references/bricks-2.3-formats.md` |
+| ⭐ **OUTILS MCP étendus** (~40 nouveaux outils ajoutés en v3.4 / v3.5 / v3.6) — pages CRUD, médias, menus, custom code, fonts, classes, theme styles, etc. | `references/outils-mcp-extended.md` |
+| **API native Bricks** (Custom Code, Fonts, Theme Styles, Global Classes, Code Execution, etc.) — où chaque chose est en DB et avec quel outil MCP la piloter | `references/bricks-native-api.md` |
+| Snippets JSON prêts à l'emploi (CTA, hero, container, grid, image) — **vérifier les formats avec bricks-2.3-formats.md d'abord** | `references/cheat-sheet.md` |
+| Doc des 11 outils MCP originaux (lecture/écriture éléments) | `references/outils-mcp.md` |
 | Patterns techniques (color, typography, flexbox, grid, etc.) + catalogue modules | `references/patterns.md` |
-| 10 pièges fréquents avec solutions testées | `references/pitfalls.md` |
+| 13 pièges fréquents avec solutions testées (lit le préambule **bricks-2.3-formats.md** d'abord) | `references/pitfalls.md` |
 | Méthodologie complète (workflow, vérifications, économie tokens) | `references/workflow.md` |
-| Guide général exhaustif (architecture, breakpoints, hiérarchie, exemples) | `references/guide-complet.md` |
+| Guide général exhaustif (architecture, breakpoints, hiérarchie, exemples) — **certains formats peuvent être obsolètes pour Bricks 2.3, croiser avec bricks-2.3-formats.md** | `references/guide-complet.md` |
 | Faire du **design web professionnel** (hiérarchie visuelle, palettes, typo) | `references/design-web.md` |
 | Optimiser le **SEO** (hiérarchie Hn, schema, Core Web Vitals, local SEO) | `references/seo.md` |
 | Exemples concrets de structures JSON pour tous types d'éléments | `references/test-structures.json` |
@@ -134,10 +192,10 @@ Quand tu attaques une tâche Bricks, **consulte le fichier de référence approp
 1. **Lire le fichier de référence** correspondant à la tâche (voir tableau ci-dessus)
 2. **Explorer** la page existante : `list_bricks_pages` → `get_page_structure`
 3. **Cloner** des formats existants si propriétés incertaines : `find_elements` + `get_element`
-4. **Construire petit à petit** : `batch_add` (≤ 10 éléments) → vérification rapide → batch_add suivant
-5. **Vérifier au fur et à mesure** avec `browser_evaluate` (économe en tokens)
-6. **Screenshot final** avec `waitForMS: 2000` pour validation visuelle
-7. **Auto-corriger** si un problème est détecté (rollback + correction + nouvelle tentative)
+4. **Construire petit à petit** : `batch_add` (≤ 10 éléments par appel)
+5. ⭐ **`verify_element` après CHAQUE batch significatif** — image + report en 1 appel. Score < 9/10 → corriger avec les hints avant de continuer.
+6. **`report_missing_feature`** si tu butes sur quelque chose que Bricks fait nativement mais le MCP non
+7. **Screenshot final fullpage** (`screenshot-website-fast` avec waitForMS: 2000) pour validation visuelle de bout en bout
 
 ## Notes importantes
 

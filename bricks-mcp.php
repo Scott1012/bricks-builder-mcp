@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.6.2
+ * Version: 3.7.0
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.6.2');
+define('BRICKS_MCP_VERSION', '3.7.0');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -329,6 +329,13 @@ class BricksMCPServer {
         register_rest_route($namespace, '/list-css-variables', ['methods' => 'GET', 'callback' => [$this, 'api_list_css_variables'], 'permission_callback' => [$this, 'check_api_key']]);
         register_rest_route($namespace, '/set-css-variable', ['methods' => 'POST', 'callback' => [$this, 'api_set_css_variable'], 'permission_callback' => [$this, 'check_api_key']]);
         register_rest_route($namespace, '/list-components', ['methods' => 'GET', 'callback' => [$this, 'api_list_components'], 'permission_callback' => [$this, 'check_api_key']]);
+
+        // ===== v3.7.0 — Verify element + Feedback system + Batch upload =====
+        register_rest_route($namespace, '/verify-element-info', ['methods' => 'POST', 'callback' => [$this, 'api_verify_element_info'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/report-missing-feature', ['methods' => 'POST', 'callback' => [$this, 'api_report_missing_feature'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/list-missing-features', ['methods' => 'GET', 'callback' => [$this, 'api_list_missing_features'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/resolve-missing-feature', ['methods' => 'POST', 'callback' => [$this, 'api_resolve_missing_feature'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/upload-media-batch', ['methods' => 'POST', 'callback' => [$this, 'api_upload_media_batch'], 'permission_callback' => [$this, 'check_api_key']]);
     }
 
     // Vérification de la clé API
@@ -2572,6 +2579,429 @@ class BricksMCPServer {
         readfile($tmp_file);
         @unlink($tmp_file);
         exit;
+    }
+
+    // =====================================================
+    // v3.7.0 — VERIFY ELEMENT INFO
+    // =====================================================
+    //
+    // Retourne tout ce qu'il faut au MCP server pour faire une
+    // vérification visuelle + technique d'un élément :
+    // - URL frontend de la page (avec ancre vers l'élément)
+    // - Sélecteur CSS Bricks (.brxe-{id})
+    // - Settings attendus (typography, gap, padding, dimensions,
+    //   background, border-radius) extraits depuis la DB
+    // - Label de l'élément + nom + nombre d'enfants
+    //
+    public function api_verify_element_info($request) {
+        $page_id = (int) $request->get_param('pageId');
+        $element_id = $request->get_param('elementId');
+
+        if (!$page_id || !$element_id) {
+            return new WP_Error('missing_params', 'pageId et elementId requis', ['status' => 400]);
+        }
+
+        $json_data = get_post_meta($page_id, '_bricks_page_content_2', true);
+        if (empty($json_data) || !is_array($json_data)) {
+            return new WP_Error('page_not_found', 'Page non trouvée', ['status' => 404]);
+        }
+
+        $target = null;
+        foreach ($json_data as $el) {
+            if (($el['id'] ?? '') === $element_id) {
+                $target = $el;
+                break;
+            }
+        }
+        if (!$target) {
+            return new WP_Error('element_not_found', 'Élément non trouvé sur cette page', ['status' => 404]);
+        }
+
+        $permalink = get_permalink($page_id);
+        if (!$permalink) {
+            return new WP_Error('no_permalink', 'Impossible de calculer le permalink', ['status' => 500]);
+        }
+
+        $settings = $target['settings'] ?? [];
+        $expected = $this->extract_expected_styles($settings);
+
+        return rest_ensure_response([
+            'success' => true,
+            'pageId' => $page_id,
+            'elementId' => $element_id,
+            'url' => $permalink,
+            'urlWithAnchor' => $permalink . '#brxe-' . $element_id,
+            'selector' => '.brxe-' . $element_id,
+            'name' => $target['name'] ?? null,
+            'label' => $target['label'] ?? null,
+            'childrenCount' => isset($target['children']) && is_array($target['children']) ? count($target['children']) : 0,
+            'expected' => $expected,
+            'rawSettings' => $settings,
+        ]);
+    }
+
+    /**
+     * Convertit les settings Bricks en propriétés CSS attendues lisibles
+     * pour comparaison avec getComputedStyle côté front.
+     */
+    private function extract_expected_styles($settings) {
+        if (!is_array($settings)) {
+            return [];
+        }
+        $expected = [];
+
+        // Display + flex
+        if (isset($settings['_display'])) {
+            $expected['display'] = $settings['_display'];
+        }
+        if (isset($settings['_direction'])) {
+            $expected['flex-direction'] = $settings['_direction'];
+        }
+        if (isset($settings['_justifyContent'])) {
+            $expected['justify-content'] = $settings['_justifyContent'];
+        }
+        if (isset($settings['_alignItems'])) {
+            $expected['align-items'] = $settings['_alignItems'];
+        }
+        if (isset($settings['_gap'])) {
+            $gap = $settings['_gap'];
+            if (is_array($gap) && isset($gap['size'])) {
+                $unit = $gap['unit'] ?? 'px';
+                $expected['gap'] = $gap['size'] . $unit;
+            } elseif (is_string($gap) || is_numeric($gap)) {
+                $expected['gap'] = $gap . 'px';
+            }
+        }
+        if (isset($settings['_columnGap'])) {
+            $expected['column-gap'] = (string) $settings['_columnGap'] . 'px';
+        }
+        if (isset($settings['_rowGap'])) {
+            $expected['row-gap'] = (string) $settings['_rowGap'] . 'px';
+        }
+
+        // Width / Height
+        if (isset($settings['_widthMax'])) {
+            $expected['max-width'] = $settings['_widthMax'] . 'px';
+        }
+        if (isset($settings['_width'])) {
+            $w = $settings['_width'];
+            if (is_array($w) && isset($w['size'])) {
+                $expected['width'] = $w['size'] . ($w['unit'] ?? 'px');
+            } elseif (is_string($w) || is_numeric($w)) {
+                $expected['width'] = $w . 'px';
+            }
+        }
+        if (isset($settings['_height'])) {
+            $h = $settings['_height'];
+            if (is_array($h) && isset($h['size'])) {
+                $expected['height'] = $h['size'] . ($h['unit'] ?? 'px');
+            } elseif (is_string($h) || is_numeric($h)) {
+                $expected['height'] = $h . 'px';
+            }
+        }
+
+        // Padding / Margin (flat ou shorthand)
+        foreach (['_padding' => 'padding', '_margin' => 'margin'] as $key => $prop) {
+            if (isset($settings[$key]) && is_array($settings[$key])) {
+                $sides = $settings[$key];
+                $expected[$prop . '-top'] = (isset($sides['top']) ? $sides['top'] . 'px' : null);
+                $expected[$prop . '-right'] = (isset($sides['right']) ? $sides['right'] . 'px' : null);
+                $expected[$prop . '-bottom'] = (isset($sides['bottom']) ? $sides['bottom'] . 'px' : null);
+                $expected[$prop . '-left'] = (isset($sides['left']) ? $sides['left'] . 'px' : null);
+            }
+        }
+
+        // Background color (raw rgba ou hex)
+        if (isset($settings['_background']['color'])) {
+            $bg = $settings['_background']['color'];
+            if (is_array($bg)) {
+                if (isset($bg['raw'])) {
+                    $expected['background-color'] = $bg['raw'];
+                } elseif (isset($bg['hex'])) {
+                    $expected['background-color'] = $bg['hex'];
+                }
+            }
+        }
+
+        // Typography
+        if (isset($settings['_typography']) && is_array($settings['_typography'])) {
+            $typo = $settings['_typography'];
+            if (isset($typo['font-size'])) {
+                $fs = $typo['font-size'];
+                if (is_array($fs) && isset($fs['size'])) {
+                    $expected['font-size'] = $fs['size'] . ($fs['unit'] ?? 'px');
+                } elseif (is_string($fs) || is_numeric($fs)) {
+                    $expected['font-size'] = $fs . 'px';
+                }
+            }
+            if (isset($typo['line-height'])) {
+                $expected['line-height'] = (string) $typo['line-height'];
+            }
+            if (isset($typo['font-family'])) {
+                $expected['font-family'] = $typo['font-family'];
+            }
+            if (isset($typo['font-weight'])) {
+                $expected['font-weight'] = (string) $typo['font-weight'];
+            }
+            if (isset($typo['color']['raw'])) {
+                $expected['color'] = $typo['color']['raw'];
+            } elseif (isset($typo['color']['hex'])) {
+                $expected['color'] = $typo['color']['hex'];
+            }
+            if (isset($typo['text-align'])) {
+                $expected['text-align'] = $typo['text-align'];
+            }
+        }
+
+        // Border-radius (imbriqué)
+        if (isset($settings['_border']['radius']) && is_array($settings['_border']['radius'])) {
+            $r = $settings['_border']['radius'];
+            $expected['border-top-left-radius'] = isset($r['top']) ? $r['top'] . 'px' : null;
+            $expected['border-top-right-radius'] = isset($r['right']) ? $r['right'] . 'px' : null;
+            $expected['border-bottom-right-radius'] = isset($r['bottom']) ? $r['bottom'] . 'px' : null;
+            $expected['border-bottom-left-radius'] = isset($r['left']) ? $r['left'] . 'px' : null;
+        }
+
+        // Nettoyer les null
+        return array_filter($expected, function($v) { return $v !== null; });
+    }
+
+    // =====================================================
+    // v3.7.0 — FEEDBACK SYSTEM (missing features)
+    // =====================================================
+    //
+    // Permet à un chat AI de signaler qu'une feature native Bricks
+    // n'est pas exposée via MCP (ou outil buggy). Stocké dans l'option
+    // WP `bricks_mcp_feedback` (array). Pas utilisé pour les features
+    // que Bricks ne supporte pas nativement — dans ce cas l'AI doit
+    // coder une alternative (CSS / JS via set_page_custom_code).
+    //
+    public function api_report_missing_feature($request) {
+        $title = sanitize_text_field((string) $request->get_param('title'));
+        $bricks_feature = sanitize_text_field((string) $request->get_param('bricksFeature'));
+        $bricks_doc_url = esc_url_raw((string) $request->get_param('bricksDocUrl'));
+        $what_it_should_do = sanitize_textarea_field((string) $request->get_param('whatItShouldDo'));
+        $what_i_tried = sanitize_textarea_field((string) $request->get_param('whatITried'));
+        $proposed_tool = sanitize_text_field((string) $request->get_param('proposedTool'));
+        $bricks_version = sanitize_text_field((string) $request->get_param('bricksVersion'));
+        $context = sanitize_textarea_field((string) $request->get_param('context'));
+
+        if (empty($title) || empty($bricks_feature)) {
+            return new WP_Error('missing_params', 'title et bricksFeature sont requis', ['status' => 400]);
+        }
+
+        $feedback = get_option('bricks_mcp_feedback', []);
+        if (!is_array($feedback)) {
+            $feedback = [];
+        }
+
+        // Dédupe par titre normalisé → augmente occurrences
+        $key = strtolower(preg_replace('/\s+/', '-', trim($title)));
+        $existing_index = null;
+        foreach ($feedback as $i => $item) {
+            if (($item['key'] ?? '') === $key && ($item['status'] ?? 'open') === 'open') {
+                $existing_index = $i;
+                break;
+            }
+        }
+
+        $now = current_time('mysql');
+        if ($existing_index !== null) {
+            $feedback[$existing_index]['occurrences'] = (int)($feedback[$existing_index]['occurrences'] ?? 1) + 1;
+            $feedback[$existing_index]['lastSeenAt'] = $now;
+            // Ajouter le contexte si fourni
+            if (!empty($context)) {
+                $feedback[$existing_index]['contexts'][] = ['at' => $now, 'context' => $context];
+            }
+            update_option('bricks_mcp_feedback', $feedback, false);
+            return rest_ensure_response([
+                'success' => true,
+                'id' => $feedback[$existing_index]['id'],
+                'status' => 'incremented',
+                'occurrences' => $feedback[$existing_index]['occurrences'],
+                'message' => 'Feedback existant trouvé — occurrences incrémentées.',
+            ]);
+        }
+
+        $new_item = [
+            'id' => uniqid('fbk_', false),
+            'key' => $key,
+            'title' => $title,
+            'bricksFeature' => $bricks_feature,
+            'bricksDocUrl' => $bricks_doc_url,
+            'whatItShouldDo' => $what_it_should_do,
+            'whatITried' => $what_i_tried,
+            'proposedTool' => $proposed_tool,
+            'bricksVersion' => $bricks_version,
+            'contexts' => !empty($context) ? [['at' => $now, 'context' => $context]] : [],
+            'status' => 'open',
+            'occurrences' => 1,
+            'createdAt' => $now,
+            'lastSeenAt' => $now,
+        ];
+        $feedback[] = $new_item;
+        update_option('bricks_mcp_feedback', $feedback, false);
+
+        return rest_ensure_response([
+            'success' => true,
+            'id' => $new_item['id'],
+            'status' => 'created',
+            'message' => 'Feedback enregistré. Remontera dans list_missing_features.',
+            'totalOpen' => count(array_filter($feedback, function($it) { return ($it['status'] ?? 'open') === 'open'; })),
+        ]);
+    }
+
+    public function api_list_missing_features($request) {
+        $status_filter = $request->get_param('status'); // 'open' | 'resolved' | null (= tous)
+        $feedback = get_option('bricks_mcp_feedback', []);
+        if (!is_array($feedback)) {
+            $feedback = [];
+        }
+
+        if (!empty($status_filter)) {
+            $feedback = array_values(array_filter($feedback, function($it) use ($status_filter) {
+                return ($it['status'] ?? 'open') === $status_filter;
+            }));
+        }
+
+        // Tri : occurrences DESC, puis createdAt DESC
+        usort($feedback, function($a, $b) {
+            $oa = (int)($a['occurrences'] ?? 1);
+            $ob = (int)($b['occurrences'] ?? 1);
+            if ($oa !== $ob) return $ob - $oa;
+            return strcmp($b['createdAt'] ?? '', $a['createdAt'] ?? '');
+        });
+
+        return rest_ensure_response([
+            'success' => true,
+            'count' => count($feedback),
+            'items' => $feedback,
+        ]);
+    }
+
+    public function api_resolve_missing_feature($request) {
+        $id = sanitize_text_field((string) $request->get_param('id'));
+        $resolution_note = sanitize_textarea_field((string) $request->get_param('resolutionNote'));
+
+        if (empty($id)) {
+            return new WP_Error('missing_params', 'id requis', ['status' => 400]);
+        }
+
+        $feedback = get_option('bricks_mcp_feedback', []);
+        if (!is_array($feedback)) {
+            return new WP_Error('not_found', 'Aucun feedback enregistré', ['status' => 404]);
+        }
+
+        $found = false;
+        foreach ($feedback as &$item) {
+            if (($item['id'] ?? '') === $id) {
+                $item['status'] = 'resolved';
+                $item['resolvedAt'] = current_time('mysql');
+                $item['resolutionNote'] = $resolution_note;
+                $found = true;
+                break;
+            }
+        }
+        unset($item);
+
+        if (!$found) {
+            return new WP_Error('not_found', 'Feedback id introuvable', ['status' => 404]);
+        }
+
+        update_option('bricks_mcp_feedback', $feedback, false);
+        return rest_ensure_response(['success' => true, 'id' => $id, 'status' => 'resolved']);
+    }
+
+    // =====================================================
+    // v3.7.0 — UPLOAD MEDIA BATCH
+    // =====================================================
+    //
+    // Upload de plusieurs images en 1 appel. Continue même si
+    // certaines échouent. Retourne {successes: [...], failures: [...]}.
+    //
+    public function api_upload_media_batch($request) {
+        $items = $request->get_param('items');
+        if (!is_array($items) || empty($items)) {
+            return new WP_Error('missing_items', 'items (array) requis', ['status' => 400]);
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        $successes = [];
+        $failures = [];
+
+        foreach ($items as $index => $item) {
+            $source_url = esc_url_raw($item['sourceUrl'] ?? '');
+            $title_param = $item['title'] ?? null;
+            $alt = $item['alt'] ?? null;
+            $caption = $item['caption'] ?? null;
+
+            if (empty($source_url)) {
+                $failures[] = ['index' => $index, 'error' => 'sourceUrl manquant', 'item' => $item];
+                continue;
+            }
+
+            $tmp = download_url($source_url, 60);
+            if (is_wp_error($tmp)) {
+                $failures[] = ['index' => $index, 'sourceUrl' => $source_url, 'error' => 'download: ' . $tmp->get_error_message()];
+                continue;
+            }
+
+            // Détection extension (même logique qu'api_upload_media)
+            $url_filename = basename(parse_url($source_url, PHP_URL_PATH));
+            $ext = 'jpg';
+            if (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)$/i', $url_filename, $m_ext)) {
+                $ext = strtolower($m_ext[1]);
+            } elseif (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)([?#]|$)/i', $source_url, $m_ext)) {
+                $ext = strtolower($m_ext[1]);
+            }
+
+            if (!empty($title_param)) {
+                $filename = sanitize_title($title_param) . '.' . $ext;
+            } elseif (!empty($url_filename) && preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)$/i', $url_filename)) {
+                $filename = $url_filename;
+            } else {
+                $filename = 'upload-' . time() . '-' . $index . '.' . $ext;
+            }
+
+            $file_array = ['name' => $filename, 'tmp_name' => $tmp];
+            $attachment_id = media_handle_sideload($file_array, 0);
+
+            if (is_wp_error($attachment_id)) {
+                @unlink($tmp);
+                $failures[] = ['index' => $index, 'sourceUrl' => $source_url, 'error' => 'sideload: ' . $attachment_id->get_error_message()];
+                continue;
+            }
+
+            if (!empty($title_param)) {
+                wp_update_post(['ID' => $attachment_id, 'post_title' => sanitize_text_field($title_param)]);
+            }
+            if (!empty($alt)) {
+                update_post_meta($attachment_id, '_wp_attachment_image_alt', sanitize_text_field($alt));
+            }
+            if (!empty($caption)) {
+                wp_update_post(['ID' => $attachment_id, 'post_excerpt' => sanitize_text_field($caption)]);
+            }
+
+            $successes[] = [
+                'index' => $index,
+                'id' => $attachment_id,
+                'url' => wp_get_attachment_url($attachment_id),
+                'filename' => $filename,
+                'sourceUrl' => $source_url,
+            ];
+        }
+
+        return rest_ensure_response([
+            'success' => true,
+            'total' => count($items),
+            'uploaded' => count($successes),
+            'failed' => count($failures),
+            'successes' => $successes,
+            'failures' => $failures,
+        ]);
     }
 }
 

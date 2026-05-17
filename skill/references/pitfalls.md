@@ -4,6 +4,28 @@
 
 ---
 
+## ⚠️ AVANT TOUT — Lire `bricks-2.3-formats.md` en premier
+
+Ce fichier (pitfalls.md) date d'une autre installation Bricks et documente des pièges **génériques**. Pour les **formats validés sur Bricks 2.3** (la version en production aujourd'hui), lis d'abord :
+
+➡️ **`references/bricks-2.3-formats.md`** — formats validés en production (Bricks 2.3.2 / WordPress 6.9 / 2026-04-29)
+
+Notamment ces pièges critiques **non couverts dans ce fichier** :
+
+| Souci | Cause | Solution |
+|---|---|---|
+| `border-radius` ne s'applique pas | `_borderRadius` flat ignoré | Utiliser `_border.radius` imbriqué |
+| `line-height` pas appliqué (le builder affiche `[object Object]`) | Format `{size, unit}` obsolète en Bricks 2.3 | String simple `"1.5"` |
+| Couleur transparente pas prise en compte | `{hex: "..."}` ne supporte pas alpha | `{raw: "rgba(...)"}` |
+| Google Font ne charge pas (Anton / Inter en Times Roman) | Font Manager Bricks ne génère pas de `@font-face` frontend | `set_custom_code({customScriptsHeader: "<link Google Fonts>"})` |
+| Variables CSS / Global Classes / Theme Styles créées via API ne s'appliquent pas | Bricks 2.3 n'utilise pas ces options DB pour générer le CSS frontend | Générer manuellement via `set_custom_code({customCss: ":root { --... } .btn-... { ... }"})` |
+| `update_element` n'efface pas mes anciens settings | Merge récursif (pas replace) | Utiliser `update_page_json` complet ou attendre `replace_element_settings` |
+| `code` element affiche le texte au lieu d'exécuter | Bricks 1.9.7+ désactive code execution par défaut | `set_code_execution({enabled: true})` + signature manuelle dans le builder. Sinon préférer éléments natifs (image+data URI, `_background.videoUrl`) |
+
+**Le fichier `bricks-2.3-formats.md` détaille chacun de ces points** avec exemples copiables.
+
+---
+
 ## 1. 🎨 Icônes Font Awesome Invisibles (Carrés Blancs)
 
 ### Symptôme
