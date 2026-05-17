@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.7.1
+ * Version: 3.7.2
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.7.1');
+define('BRICKS_MCP_VERSION', '3.7.2');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -2643,6 +2643,33 @@ class BricksMCPServer {
     }
 
     /**
+     * Helper : ajoute "px" si pas déjà d'unité. Gère array {size, unit} et string.
+     * Évite le bug "100vh" + "px" → "100vhpx".
+     */
+    private function with_unit($val, $default_unit = 'px') {
+        if (is_array($val) && isset($val['size'])) {
+            $size = (string) $val['size'];
+            $unit = $val['unit'] ?? $default_unit;
+            // Si size contient déjà une unité, ne pas en ajouter
+            if (preg_match('/(px|vh|vw|em|rem|%|fr|ch|ex|cm|mm|in|pt|pc|svh|dvh|lvh)$/i', $size)) {
+                return $size;
+            }
+            return $size . $unit;
+        }
+        if (is_numeric($val)) {
+            return $val . $default_unit;
+        }
+        if (is_string($val) && $val !== '') {
+            // Déjà une unité ? On garde tel quel.
+            if (preg_match('/(px|vh|vw|em|rem|%|fr|ch|ex|cm|mm|in|pt|pc|svh|dvh|lvh|auto|none|normal)$/i', $val)) {
+                return $val;
+            }
+            return $val . $default_unit;
+        }
+        return null;
+    }
+
+    /**
      * Convertit les settings Bricks en propriétés CSS attendues lisibles
      * pour comparaison avec getComputedStyle côté front.
      */
@@ -2666,50 +2693,34 @@ class BricksMCPServer {
             $expected['align-items'] = $settings['_alignItems'];
         }
         if (isset($settings['_gap'])) {
-            $gap = $settings['_gap'];
-            if (is_array($gap) && isset($gap['size'])) {
-                $unit = $gap['unit'] ?? 'px';
-                $expected['gap'] = $gap['size'] . $unit;
-            } elseif (is_string($gap) || is_numeric($gap)) {
-                $expected['gap'] = $gap . 'px';
-            }
+            $expected['gap'] = $this->with_unit($settings['_gap']);
         }
         if (isset($settings['_columnGap'])) {
-            $expected['column-gap'] = (string) $settings['_columnGap'] . 'px';
+            $expected['column-gap'] = $this->with_unit($settings['_columnGap']);
         }
         if (isset($settings['_rowGap'])) {
-            $expected['row-gap'] = (string) $settings['_rowGap'] . 'px';
+            $expected['row-gap'] = $this->with_unit($settings['_rowGap']);
         }
 
         // Width / Height
         if (isset($settings['_widthMax'])) {
-            $expected['max-width'] = $settings['_widthMax'] . 'px';
+            $expected['max-width'] = $this->with_unit($settings['_widthMax']);
         }
         if (isset($settings['_width'])) {
-            $w = $settings['_width'];
-            if (is_array($w) && isset($w['size'])) {
-                $expected['width'] = $w['size'] . ($w['unit'] ?? 'px');
-            } elseif (is_string($w) || is_numeric($w)) {
-                $expected['width'] = $w . 'px';
-            }
+            $expected['width'] = $this->with_unit($settings['_width']);
         }
         if (isset($settings['_height'])) {
-            $h = $settings['_height'];
-            if (is_array($h) && isset($h['size'])) {
-                $expected['height'] = $h['size'] . ($h['unit'] ?? 'px');
-            } elseif (is_string($h) || is_numeric($h)) {
-                $expected['height'] = $h . 'px';
-            }
+            $expected['height'] = $this->with_unit($settings['_height']);
         }
 
         // Padding / Margin (flat ou shorthand)
         foreach (['_padding' => 'padding', '_margin' => 'margin'] as $key => $prop) {
             if (isset($settings[$key]) && is_array($settings[$key])) {
                 $sides = $settings[$key];
-                $expected[$prop . '-top'] = (isset($sides['top']) ? $sides['top'] . 'px' : null);
-                $expected[$prop . '-right'] = (isset($sides['right']) ? $sides['right'] . 'px' : null);
-                $expected[$prop . '-bottom'] = (isset($sides['bottom']) ? $sides['bottom'] . 'px' : null);
-                $expected[$prop . '-left'] = (isset($sides['left']) ? $sides['left'] . 'px' : null);
+                $expected[$prop . '-top'] = isset($sides['top']) ? $this->with_unit($sides['top']) : null;
+                $expected[$prop . '-right'] = isset($sides['right']) ? $this->with_unit($sides['right']) : null;
+                $expected[$prop . '-bottom'] = isset($sides['bottom']) ? $this->with_unit($sides['bottom']) : null;
+                $expected[$prop . '-left'] = isset($sides['left']) ? $this->with_unit($sides['left']) : null;
             }
         }
 
@@ -2729,12 +2740,7 @@ class BricksMCPServer {
         if (isset($settings['_typography']) && is_array($settings['_typography'])) {
             $typo = $settings['_typography'];
             if (isset($typo['font-size'])) {
-                $fs = $typo['font-size'];
-                if (is_array($fs) && isset($fs['size'])) {
-                    $expected['font-size'] = $fs['size'] . ($fs['unit'] ?? 'px');
-                } elseif (is_string($fs) || is_numeric($fs)) {
-                    $expected['font-size'] = $fs . 'px';
-                }
+                $expected['font-size'] = $this->with_unit($typo['font-size']);
             }
             if (isset($typo['line-height'])) {
                 $expected['line-height'] = (string) $typo['line-height'];
@@ -2758,10 +2764,10 @@ class BricksMCPServer {
         // Border-radius (imbriqué)
         if (isset($settings['_border']['radius']) && is_array($settings['_border']['radius'])) {
             $r = $settings['_border']['radius'];
-            $expected['border-top-left-radius'] = isset($r['top']) ? $r['top'] . 'px' : null;
-            $expected['border-top-right-radius'] = isset($r['right']) ? $r['right'] . 'px' : null;
-            $expected['border-bottom-right-radius'] = isset($r['bottom']) ? $r['bottom'] . 'px' : null;
-            $expected['border-bottom-left-radius'] = isset($r['left']) ? $r['left'] . 'px' : null;
+            $expected['border-top-left-radius'] = isset($r['top']) ? $this->with_unit($r['top']) : null;
+            $expected['border-top-right-radius'] = isset($r['right']) ? $this->with_unit($r['right']) : null;
+            $expected['border-bottom-right-radius'] = isset($r['bottom']) ? $this->with_unit($r['bottom']) : null;
+            $expected['border-bottom-left-radius'] = isset($r['left']) ? $this->with_unit($r['left']) : null;
         }
 
         // Nettoyer les null
