@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.7.0
+ * Version: 3.7.1
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.7.0');
+define('BRICKS_MCP_VERSION', '3.7.1');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -2631,7 +2631,9 @@ class BricksMCPServer {
             'elementId' => $element_id,
             'url' => $permalink,
             'urlWithAnchor' => $permalink . '#brxe-' . $element_id,
-            'selector' => '.brxe-' . $element_id,
+            // Bricks utilise id="brxe-{id}" (id HTML attr, toujours présent),
+            // pas .brxe-{id} (classe absente sur les sections).
+            'selector' => '#brxe-' . $element_id,
             'name' => $target['name'] ?? null,
             'label' => $target['label'] ?? null,
             'childrenCount' => isset($target['children']) && is_array($target['children']) ? count($target['children']) : 0,
