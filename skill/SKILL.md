@@ -1,11 +1,26 @@
 ---
 name: bricks-builder
+version: 1.0.0
 description: Pilote Bricks Builder (page builder WordPress) pour créer, modifier et convertir des pages. Se déclenche pour toute tâche impliquant Bricks - convertir du HTML/CSS, créer une page, ajouter ou modifier des sections, des éléments, gérer le responsive, optimiser le SEO d'un site Bricks. Inclut une bibliothèque de patterns, pièges connus, workflow recommandé, et un guide complet basé sur 640+ éléments testés en production.
 ---
 
-# 🧱 Bricks Builder — Skill Complet
+# 🧱 Bricks Builder — Skill Complet (v1.0.0)
 
 Skill pour piloter **Bricks Builder** (page builder WordPress) via les outils MCP. Couvre la création, modification et conversion de pages, le design responsive, le SEO et tous les patterns testés en production.
+
+## ⭐ AVANT TOUT — Vérifier la version du skill
+
+Au début de chaque conversation impliquant Bricks, appelle :
+
+```js
+check_skill_version({localVersion: "1.0.0"})  // remplace par la version au-dessus
+```
+
+Si la réponse indique qu'une version plus récente est disponible, **informe l'utilisateur** :
+
+> "Tu utilises le skill bricks-builder v{LOCAL}, mais v{LATEST} est disponible. Va dans WP admin → Bricks MCP → 'Télécharger pour Claude' pour récupérer la nouvelle version."
+
+Continue ensuite normalement avec la doc locale — pas besoin de bloquer le travail.
 
 ## Quand ce skill se déclenche
 

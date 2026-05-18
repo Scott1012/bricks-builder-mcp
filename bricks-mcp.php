@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.8.0
+ * Version: 3.9.0
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.8.0');
+define('BRICKS_MCP_VERSION', '3.9.0');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -336,6 +336,9 @@ class BricksMCPServer {
         register_rest_route($namespace, '/list-missing-features', ['methods' => 'GET', 'callback' => [$this, 'api_list_missing_features'], 'permission_callback' => [$this, 'check_api_key']]);
         register_rest_route($namespace, '/resolve-missing-feature', ['methods' => 'POST', 'callback' => [$this, 'api_resolve_missing_feature'], 'permission_callback' => [$this, 'check_api_key']]);
         register_rest_route($namespace, '/upload-media-batch', ['methods' => 'POST', 'callback' => [$this, 'api_upload_media_batch'], 'permission_callback' => [$this, 'check_api_key']]);
+
+        // ===== v3.9.0 — Skill versioning =====
+        register_rest_route($namespace, '/skill-version', ['methods' => 'GET', 'callback' => [$this, 'api_skill_version'], 'permission_callback' => [$this, 'check_api_key']]);
     }
 
     // Vérification de la clé API
@@ -2510,6 +2513,26 @@ class BricksMCPServer {
                 <h2 style="margin-top:0;">Étape 2 — Connecter à Claude</h2>
                 <p>Télécharge le fichier <code>.plugin</code> ci-dessous, puis <strong>glisse-le dans Claude Cowork</strong> (menu Plugins → Browse plugins → Upload). Claude saura tout seul comment se connecter à ce site.</p>
 
+                <?php
+                // v3.9.0 — Badge de version skill
+                $current_skill = $this->_read_skill_version();
+                $last_dl_skill = get_option('bricks_mcp_last_downloaded_skill_version', null);
+                if ($current_skill && $last_dl_skill && version_compare($last_dl_skill, $current_skill, '<')) :
+                ?>
+                    <div style="background:#fef3c7;border-left:4px solid #d97706;padding:12px 16px;margin:16px 0;border-radius:4px;">
+                        <strong>⚠ Mise à jour de la doc disponible</strong> — Skill embarqué dans ton dernier <code>.plugin</code> : <strong>v<?php echo esc_html($last_dl_skill); ?></strong>. Version actuelle : <strong>v<?php echo esc_html($current_skill); ?></strong>.<br>
+                        <em>Re-télécharge le <code>.plugin</code> ci-dessous et réinstalle-le dans Cowork pour avoir la doc à jour.</em>
+                    </div>
+                <?php elseif ($current_skill && $last_dl_skill) : ?>
+                    <div style="background:#dcfce7;border-left:4px solid #16a34a;padding:8px 12px;margin:16px 0;border-radius:4px;font-size:13px;">
+                        ✓ Skill v<?php echo esc_html($current_skill); ?> à jour dans ton dernier <code>.plugin</code>.
+                    </div>
+                <?php elseif ($current_skill) : ?>
+                    <div style="background:#eff6ff;border-left:4px solid #2271b1;padding:8px 12px;margin:16px 0;border-radius:4px;font-size:13px;">
+                        ℹ Version skill disponible : <strong>v<?php echo esc_html($current_skill); ?></strong>. Télécharge le <code>.plugin</code> ci-dessous pour l'embarquer.
+                    </div>
+                <?php endif; ?>
+
                 <?php if (!$is_configured): ?>
                     <p style="color:#dba617;font-weight:600;">⚠ Génère d'abord la clé API à l'étape 1.</p>
                 <?php else: ?>
@@ -2723,6 +2746,13 @@ class BricksMCPServer {
         }
 
         $zip->close();
+
+        // v3.9.0 — Enregistre la version skill embarquée dans CE .plugin
+        // pour pouvoir détecter ensuite si une MAJ est dispo.
+        $current_skill_version = $this->_read_skill_version();
+        if ($current_skill_version) {
+            update_option('bricks_mcp_last_downloaded_skill_version', $current_skill_version, false);
+        }
 
         // Stream du fichier en download
         if (ob_get_length()) {
@@ -3077,6 +3107,69 @@ class BricksMCPServer {
 
         update_option('bricks_mcp_feedback', $feedback, false);
         return rest_ensure_response(['success' => true, 'id' => $id, 'status' => 'resolved']);
+    }
+
+    // =====================================================
+    // v3.9.0 — SKILL VERSIONING
+    // =====================================================
+    //
+    // Lit la version skill depuis le frontmatter de SKILL.md.
+    // Compare avec la dernière version qui a été embarquée dans
+    // un .plugin téléchargé (stockée en option WP).
+    //
+
+    /**
+     * Lit la version du skill depuis le frontmatter de SKILL.md.
+     * Retourne string (ex: "1.0.0") ou null si introuvable.
+     */
+    private function _read_skill_version() {
+        $skill_md = BRICKS_MCP_PLUGIN_DIR . 'skill/SKILL.md';
+        if (!file_exists($skill_md)) {
+            return null;
+        }
+        $content = file_get_contents($skill_md);
+        // Parse frontmatter YAML : "version: x.y.z"
+        if (preg_match('/^version:\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$/m', $content, $m)) {
+            return $m[1];
+        }
+        return null;
+    }
+
+    public function api_skill_version($request) {
+        $current = $this->_read_skill_version();
+        $last_downloaded = get_option('bricks_mcp_last_downloaded_skill_version', null);
+
+        $is_outdated = false;
+        $update_message = null;
+        if ($current && $last_downloaded && version_compare($last_downloaded, $current, '<')) {
+            $is_outdated = true;
+            $update_message = sprintf(
+                "Une mise à jour skill est disponible (v%s → v%s). Re-télécharge le .plugin depuis WP admin → Bricks MCP.",
+                $last_downloaded,
+                $current
+            );
+        }
+
+        // Permet aussi à l'AI de comparer sa version locale (passée en query)
+        $local_version = $request->get_param('localVersion');
+        if ($local_version && $current && version_compare($local_version, $current, '<')) {
+            $is_outdated = true;
+            $update_message = sprintf(
+                "Ton skill local est en v%s, la version actuelle côté serveur est v%s. Demande à l'utilisateur de re-télécharger le .plugin depuis WP admin → Bricks MCP.",
+                $local_version,
+                $current
+            );
+        }
+
+        return rest_ensure_response([
+            'success' => true,
+            'currentSkillVersion' => $current,
+            'lastDownloadedSkillVersion' => $last_downloaded,
+            'localVersionProvided' => $local_version,
+            'isOutdated' => $is_outdated,
+            'updateMessage' => $update_message,
+            'pluginVersion' => BRICKS_MCP_VERSION,
+        ]);
     }
 
     // =====================================================
