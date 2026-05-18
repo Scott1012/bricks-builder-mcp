@@ -225,6 +225,82 @@ Avec `label`, le builder Bricks affiche un nom parlant au lieu de "Div / Div / D
 
 ---
 
+## 🟩 v3.7.0 — verify_element + Feedback system + upload batch
+
+### ⭐ `verify_element` — vérification visuelle + technique en 1 appel
+**Outil obligatoire après chaque batch_add ou update_element significatif.** Évite le "ça me semble bon" en aveugle.
+```js
+verify_element({pageId: 32, elementId: "section_hero", viewport: "desktop"})
+// → screenshot crop (visible par Claude) + report {score, checks: [{ok, label, expected, got, hint}]}
+```
+- Lance un Chromium headless, navigue, scroll vers l'élément, screenshot
+- Compare computed style vs settings DB (gap, padding, typography, border-radius, etc.)
+- Détecte fonts manquantes, erreurs JS console, overflow horizontal, children comptés
+- Viewports : `desktop` (1920×1080), `tablet`, `mobile_landscape`, `mobile_portrait`
+- Conversion auto vh/vw → px, hex ↔ rgb, filtrage des enfants Bricks-internes (bg-video)
+- Score < 9/10 → corriger avec les hints du report, re-verify, puis avancer
+
+Détails complets : `references/verify-element.md`.
+
+### ⭐ `report_missing_feature` / `list_missing_features` / `resolve_missing_feature`
+**Tracker de gaps MCP.** À utiliser quand Bricks supporte une feature nativement mais aucun outil MCP ne l'expose (ou outil buggy).
+```js
+report_missing_feature({
+  title: "Pas d'outil pour Interactions API",
+  bricksFeature: "Interactions API",
+  bricksDocUrl: "https://academy.bricksbuilder.io/article/interactions/",
+  whatItShouldDo: "...",
+  whatITried: "...",
+  proposedTool: "set_element_interactions",
+  bricksVersion: "2.3.2",
+  context: "..."
+})
+```
+- Dédup automatique par titre normalisé → compteur `occurrences` au lieu de doublons
+- **PAS** pour les limites natives Bricks — dans ce cas l'AI code une alternative libre (CSS/JS via `set_page_custom_code`)
+- Le mainteneur lit avec `list_missing_features({status: "open"})`, ajoute l'outil, puis `resolve_missing_feature({id, resolutionNote})`
+
+Détails : `references/feedback-system.md`.
+
+### `upload_media_batch` — multi-images en 1 appel
+```js
+upload_media_batch({
+  items: [
+    {sourceUrl: "https://...", title: "Logo", alt: "..."},
+    {sourceUrl: "data:image/png;base64,iVBORw0KG...", title: "Hero", alt: "..."},  // v3.7.3
+    ...
+  ]
+})
+// → {uploaded, failed, successes: [...], failures: [...]}
+```
+Continue même si certaines échouent. Plus rapide que `upload_media` × N.
+
+---
+
+## 🟩 v3.7.3 — Support data URIs dans uploads
+
+`upload_media` et `upload_media_batch` acceptent maintenant `sourceUrl` au format **`data:mime;base64,...`** en plus des URLs HTTP/HTTPS classiques.
+
+**Pourquoi c'est important** : si l'AI tourne dans un sandbox (Cowork) sans accès réseau sortant vers les hébergeurs publics, elle peut maintenant pousser des bytes binaires inline en base64.
+
+```js
+// Avant v3.7.3 : seul HTTP/HTTPS marchait
+upload_media({sourceUrl: "https://exemple.com/photo.jpg"})
+
+// Depuis v3.7.3 : data URI accepté
+upload_media({
+  sourceUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEA...",
+  title: "Photo chantier",
+  alt: "Salle de bain rénovée"
+})
+```
+
+**Formats supportés** : png, jpg, gif, webp, svg, avif, mp4, webm, mov. L'extension est déduite du MIME automatiquement.
+
+**Limite payload** : un seul tool call avec 30+ images de plusieurs Mo dépasse la limite tool-call typique (~25MB). Pour de gros volumes, splitter `upload_media_batch` en chunks de 3-5 images selon leur poids.
+
+---
+
 ## 📋 Récap par catégorie — quel outil pour quoi ?
 
 ### Workflow début de site
@@ -235,11 +311,13 @@ Avec `label`, le builder Bricks affiche un nom parlant au lieu de "Div / Div / D
 5. `create_page({setAsHomepage: true})` → créer la home
 
 ### Workflow construction de page
-1. `update_page_json` ou `batch_add` → poser la structure
-2. `update_element` (avec `label`) → renommer chaque bloc pour la lisibilité
-3. `update_element` → tweaker les détails
-4. `upload_media` → ajouter les images du client
-5. `list_menus` + `add_menu_item` → intégrer les pages au menu
+1. `batch_add` (1 section, ≤ 10 éléments par appel) → poser la structure
+2. ⭐ **`verify_element`** sur le parent de la section → vérifier visuellement + comparer computed style
+3. Si score < 9/10 → `update_element` pour corriger avec les hints → re-`verify_element`
+4. `update_element` (avec `label`) → renommer chaque bloc pour la lisibilité
+5. `upload_media_batch` → ajouter les images en lot (data URI OK depuis v3.7.3)
+6. `list_menus` + `add_menu_item` → intégrer les pages au menu
+7. **Si Bricks fait nativement un truc mais aucun outil MCP n'existe** → `report_missing_feature` avant de bricoler
 
 ### Workflow design system propre
 1. `set_custom_code({customCss: ":root { --primary: ...; } .btn-primary { ... }"})` → variables + classes

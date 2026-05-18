@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.7.2
+ * Version: 3.7.3
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.7.2');
+define('BRICKS_MCP_VERSION', '3.7.3');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -1289,11 +1289,72 @@ class BricksMCPServer {
     }
 
     /**
-     * Endpoint POST /upload-media — Upload une image dans la médiathèque depuis URL.
-     * Params : sourceUrl (requis), title, alt, caption (opt)
+     * v3.7.3 — Helper : télécharge la source vers un fichier tmp.
+     * Accepte URL HTTP/HTTPS OU data URI (data:image/png;base64,...).
+     * Retourne ['tmp' => path, 'mime' => mime|null, 'is_data_uri' => bool] ou WP_Error.
+     */
+    private function _download_source_to_tmp($source_url) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+
+        // Data URI : on parse en base64 et on écrit dans un tmp
+        if (stripos($source_url, 'data:') === 0) {
+            if (!preg_match('#^data:([^;]+);base64,(.+)$#i', $source_url, $m)) {
+                return new WP_Error('invalid_data_uri', 'Data URI mal formée (attendu : data:mime;base64,...)');
+            }
+            $mime = strtolower($m[1]);
+            $bytes = base64_decode($m[2], true);
+            if ($bytes === false) {
+                return new WP_Error('invalid_b64', 'Base64 invalide dans la data URI');
+            }
+            $tmp = wp_tempnam();
+            if (!$tmp) {
+                return new WP_Error('tmp_failed', 'Impossible de créer le fichier temporaire');
+            }
+            if (file_put_contents($tmp, $bytes) === false) {
+                @unlink($tmp);
+                return new WP_Error('tmp_write_failed', 'Impossible d\'écrire le fichier temporaire');
+            }
+            return ['tmp' => $tmp, 'mime' => $mime, 'is_data_uri' => true];
+        }
+
+        // URL HTTP/HTTPS : comportement existant
+        $tmp = download_url($source_url, 60);
+        if (is_wp_error($tmp)) {
+            return $tmp;
+        }
+        return ['tmp' => $tmp, 'mime' => null, 'is_data_uri' => false];
+    }
+
+    /**
+     * v3.7.3 — Map MIME → extension pour les data URIs.
+     */
+    private function _ext_from_mime($mime) {
+        $map = [
+            'image/png' => 'png',
+            'image/jpeg' => 'jpg',
+            'image/jpg' => 'jpg',
+            'image/gif' => 'gif',
+            'image/webp' => 'webp',
+            'image/svg+xml' => 'svg',
+            'image/avif' => 'avif',
+            'video/mp4' => 'mp4',
+            'video/webm' => 'webm',
+            'video/quicktime' => 'mov',
+        ];
+        return $map[strtolower((string) $mime)] ?? null;
+    }
+
+    /**
+     * Endpoint POST /upload-media — Upload une image dans la médiathèque depuis URL ou data URI.
+     * Params : sourceUrl (requis — URL HTTP/HTTPS ou "data:mime;base64,..."), title, alt, caption (opt)
      */
     public function api_upload_media($request) {
-        $source_url = esc_url_raw($request->get_param('sourceUrl'));
+        // v3.7.3 — Ne pas passer par esc_url_raw pour les data URIs (les casserait).
+        $source_url = (string) $request->get_param('sourceUrl');
+        $is_data_uri = stripos($source_url, 'data:') === 0;
+        if (!$is_data_uri) {
+            $source_url = esc_url_raw($source_url);
+        }
         if (empty($source_url)) {
             return new WP_Error('missing_url', 'sourceUrl est requis', ['status' => 400]);
         }
@@ -1302,21 +1363,24 @@ class BricksMCPServer {
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
 
-        // Télécharger le fichier dans le tmp
-        $tmp = download_url($source_url, 60);
-        if (is_wp_error($tmp)) {
-            return new WP_Error('download_failed', 'Impossible de télécharger : ' . $tmp->get_error_message(), ['status' => 500]);
+        // v3.7.3 — helper qui gère URL HTTP/HTTPS ET data URIs
+        $dl = $this->_download_source_to_tmp($source_url);
+        if (is_wp_error($dl)) {
+            return new WP_Error('download_failed', 'Impossible de récupérer la source : ' . $dl->get_error_message(), ['status' => 500]);
         }
+        $tmp = $dl['tmp'];
 
         // Détecter le nom de fichier
-        // v3.6.1 — Si title fourni, l'utiliser comme base du nom (slugifié) pour avoir des fichiers parlants
         $title_for_name = $request->get_param('title');
-        $url_filename = basename(parse_url($source_url, PHP_URL_PATH));
-        // Détecter l'extension depuis l'URL (priorité) ou par défaut .jpg
+        $url_filename = $is_data_uri ? '' : basename(parse_url($source_url, PHP_URL_PATH));
+        // Extension : depuis le MIME (data URI) sinon depuis l'URL
         $ext = 'jpg';
-        if (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)$/i', $url_filename, $m_ext)) {
+        if ($is_data_uri && !empty($dl['mime'])) {
+            $maybe_ext = $this->_ext_from_mime($dl['mime']);
+            if ($maybe_ext) $ext = $maybe_ext;
+        } elseif (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif|mp4|webm|mov)$/i', $url_filename, $m_ext)) {
             $ext = strtolower($m_ext[1]);
-        } elseif (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)([?#]|$)/i', $source_url, $m_ext)) {
+        } elseif (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif|mp4|webm|mov)([?#]|$)/i', $source_url, $m_ext)) {
             $ext = strtolower($m_ext[1]);
         }
 
@@ -2941,7 +3005,11 @@ class BricksMCPServer {
         $failures = [];
 
         foreach ($items as $index => $item) {
-            $source_url = esc_url_raw($item['sourceUrl'] ?? '');
+            // v3.7.3 — Accepte URL HTTP/HTTPS OU data URI ("data:mime;base64,...")
+            $raw_source = (string) ($item['sourceUrl'] ?? '');
+            $is_data_uri = stripos($raw_source, 'data:') === 0;
+            $source_url = $is_data_uri ? $raw_source : esc_url_raw($raw_source);
+
             $title_param = $item['title'] ?? null;
             $alt = $item['alt'] ?? null;
             $caption = $item['caption'] ?? null;
@@ -2951,24 +3019,32 @@ class BricksMCPServer {
                 continue;
             }
 
-            $tmp = download_url($source_url, 60);
-            if (is_wp_error($tmp)) {
-                $failures[] = ['index' => $index, 'sourceUrl' => $source_url, 'error' => 'download: ' . $tmp->get_error_message()];
+            $dl = $this->_download_source_to_tmp($source_url);
+            if (is_wp_error($dl)) {
+                $failures[] = [
+                    'index' => $index,
+                    'sourceUrl' => $is_data_uri ? '(data URI)' : $source_url,
+                    'error' => 'download: ' . $dl->get_error_message()
+                ];
                 continue;
             }
+            $tmp = $dl['tmp'];
 
-            // Détection extension (même logique qu'api_upload_media)
-            $url_filename = basename(parse_url($source_url, PHP_URL_PATH));
+            // Détection extension (data URI → mime, sinon URL)
+            $url_filename = $is_data_uri ? '' : basename(parse_url($source_url, PHP_URL_PATH));
             $ext = 'jpg';
-            if (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)$/i', $url_filename, $m_ext)) {
+            if ($is_data_uri && !empty($dl['mime'])) {
+                $maybe_ext = $this->_ext_from_mime($dl['mime']);
+                if ($maybe_ext) $ext = $maybe_ext;
+            } elseif (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif|mp4|webm|mov)$/i', $url_filename, $m_ext)) {
                 $ext = strtolower($m_ext[1]);
-            } elseif (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)([?#]|$)/i', $source_url, $m_ext)) {
+            } elseif (preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif|mp4|webm|mov)([?#]|$)/i', $source_url, $m_ext)) {
                 $ext = strtolower($m_ext[1]);
             }
 
             if (!empty($title_param)) {
                 $filename = sanitize_title($title_param) . '.' . $ext;
-            } elseif (!empty($url_filename) && preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif)$/i', $url_filename)) {
+            } elseif (!empty($url_filename) && preg_match('/\.(jpg|jpeg|png|gif|webp|svg|avif|mp4|webm|mov)$/i', $url_filename)) {
                 $filename = $url_filename;
             } else {
                 $filename = 'upload-' . time() . '-' . $index . '.' . $ext;
