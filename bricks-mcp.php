@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.7.3
+ * Version: 3.8.0
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.7.3');
+define('BRICKS_MCP_VERSION', '3.8.0');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -1326,6 +1326,92 @@ class BricksMCPServer {
     }
 
     /**
+     * v3.8.0 — Convertit un attachment image en WebP optimisé (qualité 80, max 2000px).
+     * Remplace le fichier original et met à jour les meta WP.
+     * Skip si déjà WebP, SVG, ou format non-convertible.
+     * Retourne ['optimized' => bool, 'originalSize', 'optimizedSize', 'savings', 'reason'?] ou WP_Error.
+     */
+    private function _optimize_attachment_to_webp($attachment_id, $quality = 80, $max_width = 2000) {
+        $original_path = get_attached_file($attachment_id);
+        if (!$original_path || !file_exists($original_path)) {
+            return ['optimized' => false, 'reason' => 'attachment file not found'];
+        }
+
+        $ext = strtolower(pathinfo($original_path, PATHINFO_EXTENSION));
+
+        // Skip si déjà WebP
+        if ($ext === 'webp') {
+            return ['optimized' => false, 'reason' => 'already webp', 'size' => filesize($original_path)];
+        }
+
+        // Skip pour SVG, AVIF, vidéos, etc.
+        if (!in_array($ext, ['png', 'jpg', 'jpeg', 'gif'])) {
+            return ['optimized' => false, 'reason' => 'format not convertible (' . $ext . ')'];
+        }
+
+        $original_size = filesize($original_path);
+
+        $editor = wp_get_image_editor($original_path);
+        if (is_wp_error($editor)) {
+            return ['optimized' => false, 'reason' => 'editor: ' . $editor->get_error_message()];
+        }
+
+        // Resize si plus grand que $max_width (garde les proportions)
+        $dimensions = $editor->get_size();
+        if ($dimensions && $dimensions['width'] > $max_width) {
+            $editor->resize($max_width, null, false);
+        }
+
+        $editor->set_quality($quality);
+
+        // Nouveau path .webp
+        $webp_path = preg_replace('/\.[^.]+$/', '.webp', $original_path);
+
+        $saved = $editor->save($webp_path, 'image/webp');
+        if (is_wp_error($saved)) {
+            return ['optimized' => false, 'reason' => 'save: ' . $saved->get_error_message()];
+        }
+
+        $new_size = filesize($webp_path);
+
+        // Si le WebP est plus gros que l'original (rare mais possible sur petits PNG), on garde l'original
+        if ($new_size >= $original_size) {
+            @unlink($webp_path);
+            return [
+                'optimized' => false,
+                'reason' => 'webp larger than original',
+                'originalSize' => $original_size,
+                'attemptedSize' => $new_size,
+            ];
+        }
+
+        // Remplace le fichier original par le webp
+        @unlink($original_path);
+        update_attached_file($attachment_id, $webp_path);
+
+        // MAJ MIME en BD
+        wp_update_post([
+            'ID' => $attachment_id,
+            'post_mime_type' => 'image/webp',
+        ]);
+
+        // Régénère les meta (sizes etc.)
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+        $meta = wp_generate_attachment_metadata($attachment_id, $webp_path);
+        if (!empty($meta)) {
+            wp_update_attachment_metadata($attachment_id, $meta);
+        }
+
+        return [
+            'optimized' => true,
+            'originalSize' => $original_size,
+            'optimizedSize' => $new_size,
+            'savings' => round((1 - $new_size / $original_size) * 100, 1) . '%',
+            'newFile' => basename($webp_path),
+        ];
+    }
+
+    /**
      * v3.7.3 — Map MIME → extension pour les data URIs.
      */
     private function _ext_from_mime($mime) {
@@ -1417,12 +1503,21 @@ class BricksMCPServer {
             wp_update_post(['ID' => $attachment_id, 'post_excerpt' => sanitize_text_field($caption)]);
         }
 
+        // v3.8.0 — Optimisation WebP optionnelle après upload
+        $optimization = null;
+        $optimize = $request->get_param('optimize');
+        if ($optimize) {
+            $optimization = $this->_optimize_attachment_to_webp($attachment_id);
+        }
+
         return [
             'success'   => true,
             'id'        => $attachment_id,
             'url'       => wp_get_attachment_url($attachment_id),
-            'filename'  => $filename,
-            'sourceUrl' => $source_url,
+            'filename'  => $optimization && !empty($optimization['optimized']) ? $optimization['newFile'] : $filename,
+            // v3.7.4 — Ne pas écho le b64 entier des data URIs (économie contexte)
+            'sourceUrl' => $is_data_uri ? '(data URI ' . strlen($source_url) . ' chars)' : $source_url,
+            'optimization' => $optimization,
             'message'   => 'Image uploadée dans la médiathèque',
         ];
     }
@@ -2996,6 +3091,8 @@ class BricksMCPServer {
         if (!is_array($items) || empty($items)) {
             return new WP_Error('missing_items', 'items (array) requis', ['status' => 400]);
         }
+        // v3.8.0 — Optimize au niveau du batch (s'applique à tous les items)
+        $optimize_batch = (bool) $request->get_param('optimize');
 
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/file.php';
@@ -3069,12 +3166,20 @@ class BricksMCPServer {
                 wp_update_post(['ID' => $attachment_id, 'post_excerpt' => sanitize_text_field($caption)]);
             }
 
+            // v3.8.0 — Optimisation WebP par item
+            $optimization = null;
+            if ($optimize_batch) {
+                $optimization = $this->_optimize_attachment_to_webp($attachment_id);
+            }
+
             $successes[] = [
                 'index' => $index,
                 'id' => $attachment_id,
                 'url' => wp_get_attachment_url($attachment_id),
-                'filename' => $filename,
-                'sourceUrl' => $source_url,
+                'filename' => $optimization && !empty($optimization['optimized']) ? $optimization['newFile'] : $filename,
+                // v3.7.4 — Ne pas écho le b64 entier des data URIs (économie contexte)
+                'sourceUrl' => $is_data_uri ? '(data URI ' . strlen($source_url) . ' chars)' : $source_url,
+                'optimization' => $optimization,
             ];
         }
 

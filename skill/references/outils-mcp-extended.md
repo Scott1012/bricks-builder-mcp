@@ -277,6 +277,54 @@ Continue même si certaines échouent. Plus rapide que `upload_media` × N.
 
 ---
 
+## 🟩 v3.8.0 — Upload depuis le filesystem local + optimisation WebP
+
+### ⭐ `upload_local_file` / `upload_local_files_batch` — la BONNE méthode pour les assets locaux
+
+**Quand utiliser** : tu as un dossier d'assets sur le disque (logos, photos chantiers, etc.) à pousser dans la médiathèque WP.
+
+```js
+upload_local_file({
+  localPath: "/Users/lost/Documents/Claude/Projects/JT CARRELAGE/jt-assets/logo.png",
+  title: "Logo JT Carrelage",        // → slugifié en "logo-jt-carrelage.webp"
+  alt: "JT Carrelage — artisan carreleur Champforgeuil",  // SEO
+  optimize: true                      // → WebP qualité 80, max 2000px (DÉFAUT true)
+})
+// → {success, id, url: ".../logo-jt-carrelage.webp", optimization: {originalSize: 124000, optimizedSize: 7800, savings: "93.7%"}}
+
+upload_local_files_batch({
+  items: [
+    {localPath: "/Users/.../hero.jpg", title: "Hero accueil JT", alt: "..."},
+    {localPath: "/Users/.../chantier-01.jpg", title: "Salle de bain bleu marine", alt: "..."},
+    // ...
+  ],
+  optimize: true
+})
+```
+
+**Pourquoi c'est essentiel** :
+- ❌ `upload_media({sourceUrl: "data:image/jpeg;base64,..."})` → tu dois encoder en b64 dans ton contexte = 120k tokens par image
+- ✅ `upload_local_file({localPath: "/Users/.../photo.jpg"})` → le MCP server (local) lit le fichier, l'encode, l'envoie au plugin. **Tu ne vois jamais les bytes**. Quelques centaines de tokens par appel.
+
+**Optimisation WebP automatique** (param `optimize`, défaut `true`) :
+- Convertit PNG/JPG/GIF en WebP qualité 80 → typiquement -80 à -95 % de poids
+- Redimensionne à 2000px max de large (gros gain sans perte visible)
+- Remplace l'attachment WP avec le `.webp` et met à jour le MIME en BD
+- Skip pour SVG, WebP déjà, vidéos, AVIF
+- Si le WebP est plus gros que l'original (rare), garde l'original
+- Renvoie `optimization: {originalSize, optimizedSize, savings}` pour transparence
+
+**Workflow type pour 30 assets** :
+```js
+// 1. AI liste les fichiers via bash : ls /path/to/assets/*
+// 2. AI génère les titles + alt SEO depuis le contexte (nom de fichier, brief du site, etc.)
+// 3. AI appelle upload_local_files_batch en une fois ou en chunks de 5-10 selon les tailles totales
+```
+
+**À éviter** : `upload_media({sourceUrl: "data:..."})` reste utile pour les images générées dynamiquement par l'AI ou téléchargées via un autre tool, mais pas pour des fichiers locaux.
+
+---
+
 ## 🟩 v3.7.3 — Support data URIs dans uploads
 
 `upload_media` et `upload_media_batch` acceptent maintenant `sourceUrl` au format **`data:mime;base64,...`** en plus des URLs HTTP/HTTPS classiques.
@@ -297,7 +345,24 @@ upload_media({
 
 **Formats supportés** : png, jpg, gif, webp, svg, avif, mp4, webm, mov. L'extension est déduite du MIME automatiquement.
 
-**Limite payload** : un seul tool call avec 30+ images de plusieurs Mo dépasse la limite tool-call typique (~25MB). Pour de gros volumes, splitter `upload_media_batch` en chunks de 3-5 images selon leur poids.
+**⚠️ Économie de contexte critique** :
+- Le base64 d'une image **double sa taille** (PNG 100 KB → ~135 KB de b64 = ~35k tokens contexte)
+- **Avant d'envoyer** : convertir en WebP avec `cwebp -q 80` réduit drastiquement (logo PNG 120 KB → WebP 7 KB)
+- Splitter `upload_media_batch` en chunks de **2-3 images max par appel** au-delà de ~50 KB par image
+- **v3.7.4** : la réponse n'écho plus le b64 dans `sourceUrl` (placeholder `(data URI N chars)`) pour économiser le contexte au retour
+
+**Workflow recommandé pour 20+ assets** :
+```bash
+# 1. Convertir tous les fichiers en WebP (qualité 80, gros gain de poids)
+for f in *.{png,jpg,jpeg}; do
+  cwebp -q 80 "$f" -o "${f%.*}.webp"
+done
+
+# 2. Encoder en data URI par batch de 2-3, et appeler upload_media_batch
+# (laisser l'AI grouper intelligemment selon les tailles)
+```
+
+**Alternative manuelle** si l'AI ne peut pas convertir : indiquer à l'utilisateur de drag-drop le dossier dans **WP Admin → Médias** (5 min pour 30 fichiers), puis utiliser `list_media` côté AI pour récupérer les IDs et les brancher sur les éléments Bricks.
 
 ---
 
