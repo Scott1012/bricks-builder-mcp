@@ -1,10 +1,10 @@
 ---
 name: bricks-builder
-version: 1.0.0
-description: Pilote Bricks Builder (page builder WordPress) pour créer, modifier et convertir des pages. Se déclenche pour toute tâche impliquant Bricks - convertir du HTML/CSS, créer une page, ajouter ou modifier des sections, des éléments, gérer le responsive, optimiser le SEO d'un site Bricks. Inclut une bibliothèque de patterns, pièges connus, workflow recommandé, et un guide complet basé sur 640+ éléments testés en production.
+version: 1.2.0
+description: Pilote Bricks Builder (page builder WordPress) pour créer, modifier et convertir des pages. Se déclenche pour toute tâche impliquant Bricks - convertir du HTML/CSS, créer une page, ajouter ou modifier des sections, des éléments, gérer le responsive, optimiser le SEO d'un site Bricks. Supporte aussi le seeding de Custom Post Types (CPT) avec ACF/Meta Box, taxonomies. Inclut une bibliothèque de patterns, pièges connus, workflow recommandé, et un guide complet basé sur 640+ éléments testés en production.
 ---
 
-# 🧱 Bricks Builder — Skill Complet (v1.0.0)
+# 🧱 Bricks Builder — Skill Complet (v1.2.0)
 
 Skill pour piloter **Bricks Builder** (page builder WordPress) via les outils MCP. Couvre la création, modification et conversion de pages, le design responsive, le SEO et tous les patterns testés en production.
 
@@ -32,7 +32,7 @@ Continue ensuite normalement avec la doc locale — pas besoin de bloquer le tra
 - **Refonte** d'une page existante
 - **Debug** d'un comportement Bricks bizarre (élément invisible, gap qui ne s'applique pas, etc.)
 
-## Les 10 règles d'or (à respecter TOUJOURS)
+## Les 11 règles d'or (à respecter TOUJOURS)
 
 ### 1. Cloner un format qui marche avant d'inventer
 
@@ -123,7 +123,26 @@ verify_element (le PARENT de la section)
 
 Détails et exemples : `references/verify-element.md`.
 
-### 10. ⭐ `report_missing_feature` si Bricks le fait mais MCP non
+### 10. ⭐ CSS/JS au BON endroit (page-specific vs global)
+
+Trois emplacements possibles pour du code custom, chacun avec **un usage précis**. Ne jamais les mélanger.
+
+| Emplacement | Outil MCP | Quand l'utiliser | Anti-pattern |
+|---|---|---|---|
+| **Page Custom Code** | `set_page_custom_code({customCss, customScripts})` | Code utile **uniquement** à cette page (animations spécifiques, scripts d'une feature unique, styles d'éléments uniques) | Mettre du design system commun ici → dupliqué sur chaque page |
+| **Global Custom Code** | `set_custom_code({customCss, customScriptsHeader, customScriptsBodyFooter})` | Design system commun (variables `:root`, classes réutilisables `.btn-*`, fonts via `<link>`) | Mettre du code scopé `body.page-id-X` ici → chargé partout pour rien |
+| **Settings de l'élément** | `update_element({newSettings: {...}})` | Tout ce qui peut être un setting natif Bricks (`_padding`, `_typography`, `_background`, etc.) | Forcer via `!important` dans le custom code |
+
+**Règle simple** :
+- Code scopé à 1 page (`body.page-id-43 .quelque-chose`) → **Page Custom Code**, jamais le global
+- Variables CSS, classes utilitaires partagées, fonts → **Global Custom Code**
+- Tout ce qui est éditable en UI Bricks → **settings de l'élément**, pas de CSS custom
+
+**Signal d'alerte** : si tu écris plus de 3 `!important`, c'est qu'un setting Bricks natif te résisterait. Cherche le bon `_xxx` dans `bricks-2.3-formats.md` avant d'utiliser `!important`.
+
+**Global Classes Bricks (Bricks 2.3+)** : pour les éléments réutilisables (boutons, cartes), préfère créer une `global-class` (`create_global_class` côté MCP) plutôt que des classes custom dans le custom code. Avantage : éditable en UI Bricks, réutilisable, exportable entre sites.
+
+### 11. ⭐ `report_missing_feature` si Bricks le fait mais MCP non
 
 **Avant d'inventer un workaround pour quelque chose que Bricks fait nativement** :
 

@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 3.9.0
+ * Version: 4.0.0
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '3.9.0');
+define('BRICKS_MCP_VERSION', '4.0.0');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -339,6 +339,15 @@ class BricksMCPServer {
 
         // ===== v3.9.0 — Skill versioning =====
         register_rest_route($namespace, '/skill-version', ['methods' => 'GET', 'callback' => [$this, 'api_skill_version'], 'permission_callback' => [$this, 'check_api_key']]);
+
+        // ===== v4.0.0 — Custom Post Types =====
+        register_rest_route($namespace, '/list-post-types', ['methods' => 'GET', 'callback' => [$this, 'api_list_post_types'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/create-post', ['methods' => 'POST', 'callback' => [$this, 'api_create_post'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/update-post', ['methods' => 'POST', 'callback' => [$this, 'api_update_post'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/delete-post', ['methods' => 'POST', 'callback' => [$this, 'api_delete_post'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/get-post', ['methods' => 'POST', 'callback' => [$this, 'api_get_post'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/list-posts', ['methods' => 'POST', 'callback' => [$this, 'api_list_posts'], 'permission_callback' => [$this, 'check_api_key']]);
+        register_rest_route($namespace, '/create-taxonomy-term', ['methods' => 'POST', 'callback' => [$this, 'api_create_taxonomy_term'], 'permission_callback' => [$this, 'check_api_key']]);
     }
 
     // Vérification de la clé API
@@ -3107,6 +3116,420 @@ class BricksMCPServer {
 
         update_option('bricks_mcp_feedback', $feedback, false);
         return rest_ensure_response(['success' => true, 'id' => $id, 'status' => 'resolved']);
+    }
+
+    // =====================================================
+    // v4.0.0 — CUSTOM POST TYPES (CPT)
+    // =====================================================
+    //
+    // Permet la création/édition/listing de posts dans n'importe quel post_type
+    // (CPT custom : chantier, avis_client, etc.). Support meta (ACF compatible),
+    // taxonomies (avec résolution slug→ID + création à la volée), featured image.
+    //
+
+    /**
+     * Helper : applique les meta fields (route ACF update_field si dispo, sinon update_post_meta).
+     */
+    private function _apply_post_meta($post_id, $meta) {
+        if (!is_array($meta)) return;
+        $has_acf = function_exists('update_field');
+        foreach ($meta as $key => $value) {
+            if ($has_acf) {
+                update_field($key, $value, $post_id);
+            } else {
+                update_post_meta($post_id, $key, $value);
+            }
+        }
+    }
+
+    /**
+     * Helper : résout les termes (slugs OU IDs) en IDs et les assigne au post.
+     * Crée le terme à la volée si slug inexistant et que l'user a la capability.
+     */
+    private function _apply_post_taxonomies($post_id, $taxonomies) {
+        if (!is_array($taxonomies)) return [];
+        $results = [];
+        foreach ($taxonomies as $taxonomy => $terms) {
+            if (!taxonomy_exists($taxonomy)) {
+                $results[$taxonomy] = ['error' => 'Taxonomy inexistante'];
+                continue;
+            }
+            if (!is_array($terms)) $terms = [$terms];
+            $term_ids = [];
+            foreach ($terms as $t) {
+                if (is_numeric($t)) {
+                    $term_ids[] = (int) $t;
+                    continue;
+                }
+                // String → cherche par slug puis par name
+                $existing = get_term_by('slug', $t, $taxonomy);
+                if (!$existing) {
+                    $existing = get_term_by('name', $t, $taxonomy);
+                }
+                if ($existing) {
+                    $term_ids[] = (int) $existing->term_id;
+                } else {
+                    // Créer le terme
+                    $new = wp_insert_term($t, $taxonomy);
+                    if (!is_wp_error($new)) {
+                        $term_ids[] = (int) $new['term_id'];
+                    }
+                }
+            }
+            if (!empty($term_ids)) {
+                $r = wp_set_post_terms($post_id, $term_ids, $taxonomy, false);
+                $results[$taxonomy] = is_wp_error($r) ? ['error' => $r->get_error_message()] : $term_ids;
+            }
+        }
+        return $results;
+    }
+
+    public function api_list_post_types($request) {
+        $pts = get_post_types(['_builtin' => false], 'objects');
+        // Inclure aussi 'page' et 'post' pour info
+        $builtin = get_post_types(['_builtin' => true, 'public' => true], 'objects');
+        $all = array_merge($builtin, $pts);
+
+        $result = [];
+        foreach ($all as $pt) {
+            $taxonomies = get_object_taxonomies($pt->name, 'names');
+            $result[] = [
+                'name' => $pt->name,
+                'label' => $pt->label ?? $pt->name,
+                'showInRest' => !empty($pt->show_in_rest),
+                'restBase' => $pt->rest_base ?? $pt->name,
+                'public' => !empty($pt->public),
+                'hierarchical' => !empty($pt->hierarchical),
+                'supports' => get_all_post_type_supports($pt->name),
+                'taxonomies' => array_values($taxonomies),
+                'builtin' => !empty($pt->_builtin),
+            ];
+        }
+
+        return rest_ensure_response([
+            'success' => true,
+            'count' => count($result),
+            'postTypes' => $result,
+        ]);
+    }
+
+    public function api_create_post($request) {
+        $post_type = sanitize_key($request->get_param('postType') ?? '');
+        $title = $request->get_param('title');
+
+        if (empty($post_type) || empty($title)) {
+            return new WP_Error('missing_params', 'postType et title sont requis', ['status' => 400]);
+        }
+        if (!post_type_exists($post_type)) {
+            return new WP_Error('post_type_not_found', "Le post_type '$post_type' n'existe pas. Utilise list_post_types pour voir ce qui est disponible.", ['status' => 400]);
+        }
+
+        $postarr = [
+            'post_type' => $post_type,
+            'post_title' => sanitize_text_field($title),
+            'post_status' => sanitize_key($request->get_param('status') ?? 'publish'),
+        ];
+
+        $optional_fields = [
+            'content' => 'post_content',
+            'excerpt' => 'post_excerpt',
+            'slug' => 'post_name',
+            'date' => 'post_date',
+            'author' => 'post_author',
+        ];
+        foreach ($optional_fields as $param => $wp_key) {
+            $val = $request->get_param($param);
+            if ($val !== null && $val !== '') {
+                $postarr[$wp_key] = ($param === 'content' || $param === 'excerpt') ? wp_kses_post($val) : $val;
+            }
+        }
+
+        $post_id = wp_insert_post($postarr, true);
+        if (is_wp_error($post_id)) {
+            return new WP_Error('insert_failed', $post_id->get_error_message(), ['status' => 500]);
+        }
+
+        // Featured image
+        $thumb_id = $request->get_param('featuredImageId');
+        if (!empty($thumb_id)) {
+            set_post_thumbnail($post_id, (int) $thumb_id);
+        }
+
+        // Meta (ACF compatible)
+        $meta = $request->get_param('meta');
+        if (is_array($meta)) {
+            $this->_apply_post_meta($post_id, $meta);
+        }
+
+        // Taxonomies (slugs ou IDs, création à la volée)
+        $tax_results = [];
+        $taxonomies = $request->get_param('taxonomies');
+        if (is_array($taxonomies)) {
+            $tax_results = $this->_apply_post_taxonomies($post_id, $taxonomies);
+        }
+
+        return rest_ensure_response([
+            'success' => true,
+            'id' => $post_id,
+            'postType' => $post_type,
+            'title' => get_the_title($post_id),
+            'url' => get_permalink($post_id),
+            'editLink' => admin_url('post.php?post=' . $post_id . '&action=edit'),
+            'status' => get_post_status($post_id),
+            'taxonomiesApplied' => $tax_results,
+        ]);
+    }
+
+    public function api_update_post($request) {
+        $post_id = (int) $request->get_param('postId');
+        if (!$post_id || !get_post($post_id)) {
+            return new WP_Error('not_found', 'Post introuvable', ['status' => 404]);
+        }
+
+        $postarr = ['ID' => $post_id];
+        $field_map = [
+            'title' => 'post_title',
+            'content' => 'post_content',
+            'excerpt' => 'post_excerpt',
+            'slug' => 'post_name',
+            'status' => 'post_status',
+            'date' => 'post_date',
+        ];
+        foreach ($field_map as $param => $wp_key) {
+            $val = $request->get_param($param);
+            if ($val !== null) {
+                if ($param === 'content' || $param === 'excerpt') {
+                    $postarr[$wp_key] = wp_kses_post($val);
+                } else {
+                    $postarr[$wp_key] = $val;
+                }
+            }
+        }
+
+        if (count($postarr) > 1) {
+            $r = wp_update_post($postarr, true);
+            if (is_wp_error($r)) {
+                return new WP_Error('update_failed', $r->get_error_message(), ['status' => 500]);
+            }
+        }
+
+        $thumb_id = $request->get_param('featuredImageId');
+        if ($thumb_id !== null) {
+            if (empty($thumb_id)) {
+                delete_post_thumbnail($post_id);
+            } else {
+                set_post_thumbnail($post_id, (int) $thumb_id);
+            }
+        }
+
+        $meta = $request->get_param('meta');
+        if (is_array($meta)) {
+            $this->_apply_post_meta($post_id, $meta);
+        }
+
+        $tax_results = [];
+        $taxonomies = $request->get_param('taxonomies');
+        if (is_array($taxonomies)) {
+            $tax_results = $this->_apply_post_taxonomies($post_id, $taxonomies);
+        }
+
+        return rest_ensure_response([
+            'success' => true,
+            'id' => $post_id,
+            'url' => get_permalink($post_id),
+            'taxonomiesApplied' => $tax_results,
+        ]);
+    }
+
+    public function api_delete_post($request) {
+        $post_id = (int) $request->get_param('postId');
+        $force = (bool) $request->get_param('force');
+
+        if (!$post_id || !get_post($post_id)) {
+            return new WP_Error('not_found', 'Post introuvable', ['status' => 404]);
+        }
+
+        $r = wp_delete_post($post_id, $force);
+        if (!$r) {
+            return new WP_Error('delete_failed', 'Suppression échouée', ['status' => 500]);
+        }
+
+        return rest_ensure_response([
+            'success' => true,
+            'id' => $post_id,
+            'deleted' => $force ? 'permanent' : 'trash',
+        ]);
+    }
+
+    public function api_get_post($request) {
+        $post_id = (int) $request->get_param('postId');
+        $post = get_post($post_id);
+        if (!$post) {
+            return new WP_Error('not_found', 'Post introuvable', ['status' => 404]);
+        }
+
+        // Récupère meta + taxonomies
+        $meta_all = get_post_meta($post_id);
+        $meta = [];
+        foreach ($meta_all as $k => $v) {
+            if (strpos($k, '_') === 0) continue; // skip _internal
+            $meta[$k] = (count($v) === 1) ? maybe_unserialize($v[0]) : array_map('maybe_unserialize', $v);
+        }
+
+        // ACF formaté si disponible
+        $acf_fields = function_exists('get_fields') ? get_fields($post_id) : null;
+
+        $taxonomies = [];
+        foreach (get_object_taxonomies($post->post_type) as $tax) {
+            $terms = wp_get_post_terms($post_id, $tax, ['fields' => 'all']);
+            if (!is_wp_error($terms) && !empty($terms)) {
+                $taxonomies[$tax] = array_map(function($t) {
+                    return ['id' => $t->term_id, 'name' => $t->name, 'slug' => $t->slug];
+                }, $terms);
+            }
+        }
+
+        $thumb_id = get_post_thumbnail_id($post_id);
+
+        return rest_ensure_response([
+            'success' => true,
+            'id' => $post_id,
+            'postType' => $post->post_type,
+            'title' => $post->post_title,
+            'content' => $post->post_content,
+            'excerpt' => $post->post_excerpt,
+            'slug' => $post->post_name,
+            'status' => $post->post_status,
+            'date' => $post->post_date,
+            'url' => get_permalink($post_id),
+            'editLink' => admin_url('post.php?post=' . $post_id . '&action=edit'),
+            'featuredImageId' => $thumb_id ?: null,
+            'featuredImageUrl' => $thumb_id ? wp_get_attachment_url($thumb_id) : null,
+            'meta' => $meta,
+            'acfFields' => $acf_fields,
+            'taxonomies' => $taxonomies,
+        ]);
+    }
+
+    public function api_list_posts($request) {
+        $post_type = sanitize_key($request->get_param('postType') ?? '');
+        if (empty($post_type) || !post_type_exists($post_type)) {
+            return new WP_Error('invalid_post_type', "Le post_type est requis et doit exister", ['status' => 400]);
+        }
+
+        $args = [
+            'post_type' => $post_type,
+            'posts_per_page' => min(100, max(1, (int) ($request->get_param('perPage') ?? 20))),
+            'paged' => max(1, (int) ($request->get_param('page') ?? 1)),
+            'post_status' => $request->get_param('status') ?? 'publish',
+            'orderby' => $request->get_param('orderBy') ?? 'date',
+            'order' => $request->get_param('order') ?? 'DESC',
+        ];
+
+        $search = $request->get_param('search');
+        if (!empty($search)) {
+            $args['s'] = sanitize_text_field($search);
+        }
+
+        $tax_filter = $request->get_param('taxonomyFilter');
+        if (is_array($tax_filter) && !empty($tax_filter)) {
+            $tax_query = [];
+            foreach ($tax_filter as $tax => $term) {
+                if (!taxonomy_exists($tax)) continue;
+                $tax_query[] = [
+                    'taxonomy' => $tax,
+                    'field' => is_numeric($term) ? 'term_id' : 'slug',
+                    'terms' => $term,
+                ];
+            }
+            if (!empty($tax_query)) {
+                $args['tax_query'] = $tax_query;
+            }
+        }
+
+        $meta_query = $request->get_param('metaQuery');
+        if (is_array($meta_query) && !empty($meta_query)) {
+            $args['meta_query'] = $meta_query;
+        }
+
+        $q = new WP_Query($args);
+        $items = [];
+        foreach ($q->posts as $p) {
+            $thumb_id = get_post_thumbnail_id($p->ID);
+            $items[] = [
+                'id' => $p->ID,
+                'title' => $p->post_title,
+                'slug' => $p->post_name,
+                'status' => $p->post_status,
+                'date' => $p->post_date,
+                'url' => get_permalink($p->ID),
+                'editLink' => admin_url('post.php?post=' . $p->ID . '&action=edit'),
+                'excerpt' => $p->post_excerpt,
+                'featuredImageId' => $thumb_id ?: null,
+                'featuredImageUrl' => $thumb_id ? wp_get_attachment_url($thumb_id) : null,
+            ];
+        }
+
+        return rest_ensure_response([
+            'success' => true,
+            'total' => (int) $q->found_posts,
+            'page' => (int) $args['paged'],
+            'perPage' => (int) $args['posts_per_page'],
+            'totalPages' => (int) $q->max_num_pages,
+            'items' => $items,
+        ]);
+    }
+
+    public function api_create_taxonomy_term($request) {
+        $taxonomy = sanitize_key($request->get_param('taxonomy') ?? '');
+        $name = $request->get_param('name');
+        if (empty($taxonomy) || empty($name)) {
+            return new WP_Error('missing_params', 'taxonomy et name requis', ['status' => 400]);
+        }
+        if (!taxonomy_exists($taxonomy)) {
+            return new WP_Error('taxonomy_not_found', "Taxonomy '$taxonomy' inexistante", ['status' => 400]);
+        }
+
+        $args = [];
+        $slug = $request->get_param('slug');
+        if (!empty($slug)) $args['slug'] = sanitize_title($slug);
+        $description = $request->get_param('description');
+        if (!empty($description)) $args['description'] = wp_kses_post($description);
+        $parent_id = $request->get_param('parentId');
+        if (!empty($parent_id)) $args['parent'] = (int) $parent_id;
+
+        // Idempotent : si déjà existant par slug, retourner son ID
+        $check_slug = !empty($slug) ? sanitize_title($slug) : sanitize_title($name);
+        $existing = get_term_by('slug', $check_slug, $taxonomy);
+        if (!$existing) {
+            $existing = get_term_by('name', $name, $taxonomy);
+        }
+        if ($existing) {
+            return rest_ensure_response([
+                'success' => true,
+                'id' => (int) $existing->term_id,
+                'taxonomy' => $taxonomy,
+                'name' => $existing->name,
+                'slug' => $existing->slug,
+                'created' => false,
+                'message' => 'Terme déjà existant — retourne son ID.',
+            ]);
+        }
+
+        $r = wp_insert_term(sanitize_text_field($name), $taxonomy, $args);
+        if (is_wp_error($r)) {
+            return new WP_Error('insert_failed', $r->get_error_message(), ['status' => 500]);
+        }
+
+        $term = get_term($r['term_id'], $taxonomy);
+        return rest_ensure_response([
+            'success' => true,
+            'id' => (int) $r['term_id'],
+            'taxonomy' => $taxonomy,
+            'name' => $term->name,
+            'slug' => $term->slug,
+            'created' => true,
+        ]);
     }
 
     // =====================================================
