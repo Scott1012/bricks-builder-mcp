@@ -2505,7 +2505,8 @@ class BricksMCPServer {
                 $safe_slug = 'bricks-site';
             }
             $tmp_script = '/tmp/bricks-' . $safe_slug . '-install-codex.sh';
-            $codex_command_1 = "curl -fsSL " . escapeshellarg($codex_script_url) . " -o " . escapeshellarg($tmp_script);
+            $curl_flags = $suggest_insecure_ssl ? '-kfsSL' : '-fsSL';
+            $codex_command_1 = "curl {$curl_flags} " . escapeshellarg($codex_script_url) . " -o " . escapeshellarg($tmp_script);
             $codex_command_2 = "bash " . escapeshellarg($tmp_script);
         }
         ?>
@@ -2840,14 +2841,16 @@ class BricksMCPServer {
         $expires = time() + DAY_IN_SECONDS;
         $token = $this->build_codex_installer_token($site_url, $label, $insecure_ssl, $expires);
 
-        return add_query_arg([
+        $query = http_build_query([
             'action'       => 'bricks_stream_codex_installer',
             'site_url'     => $site_url,
             'plugin_label' => $label,
             'insecure_ssl' => $insecure_ssl ? '1' : '0',
             'expires'      => $expires,
             'token'        => $token,
-        ], admin_url('admin-post.php'));
+        ], '', '&', PHP_QUERY_RFC3986);
+
+        return admin_url('admin-post.php') . '?' . $query;
     }
 
     private function build_codex_installer_token($site_url, $label, $insecure_ssl, $expires) {
@@ -3038,6 +3041,16 @@ class BricksMCPServer {
             . "    json.dump(data, fh, ensure_ascii=False, indent=2)\n"
             . "    fh.write('\\n')\n"
             . "PY\n\n"
+            . "if command -v codex >/dev/null 2>&1; then\n"
+            . "  echo \"Activation du plugin dans Codex...\"\n"
+            . "  if codex plugin list 2>/dev/null | grep -q \"\$PLUGIN_NAME@personal (installed\"; then\n"
+            . "    echo \"Plugin déjà installé dans Codex.\"\n"
+            . "  else\n"
+            . "    codex plugin add \"\$PLUGIN_NAME@personal\"\n"
+            . "  fi\n"
+            . "else\n"
+            . "  echo \"CLI Codex introuvable. Lance manuellement : codex plugin add \$PLUGIN_NAME@personal\"\n"
+            . "fi\n\n"
             . "echo\n"
             . "echo \"Installation Codex terminée pour \$PLUGIN_NAME.\"\n"
             . "echo \"Relance Codex si le plugin n'apparaît pas tout de suite.\"\n";
