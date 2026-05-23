@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
- * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude (Cowork/Desktop). Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork prêt à uploader, avec skill bricks-builder embarqué (7000+ lignes de doc).
- * Version: 4.1.0
+ * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude et Codex. Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork et l'installeur Codex, avec skill bricks-builder embarqué.
+ * Version: 4.2.0
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '4.1.0');
+define('BRICKS_MCP_VERSION', '4.2.0');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -39,6 +39,9 @@ class BricksMCPServer {
         add_action('rest_api_init', [$this, 'register_rest_routes']);
         // Handler pour la génération du fichier .plugin Cowork
         add_action('admin_post_bricks_download_plugin', [$this, 'handle_download_plugin']);
+        // Handler public pour le script d'installation Codex
+        add_action('admin_post_bricks_stream_codex_installer', [$this, 'handle_stream_codex_installer']);
+        add_action('admin_post_nopriv_bricks_stream_codex_installer', [$this, 'handle_stream_codex_installer']);
         // Handler pour le bouton "Vérifier les MAJ maintenant"
         add_action('admin_post_bricks_check_updates', [$this, 'handle_check_updates']);
 
@@ -2486,6 +2489,25 @@ class BricksMCPServer {
         $site_name     = get_bloginfo('name');
         $is_configured = !empty($api_key);
         $github_repo   = get_option('bricks_mcp_github_repo', BRICKS_MCP_DEFAULT_GITHUB_REPO);
+        $host          = wp_parse_url($site_url, PHP_URL_HOST);
+        $suggest_insecure_ssl = is_string($host) && preg_match('/(?:odns\.fr|live-website\.com|tempurl|staging|preprod)/i', $host);
+
+        $codex_script_url = '';
+        $codex_command_1 = '';
+        $codex_command_2 = '';
+        if ($is_configured) {
+            $codex_script_url = $this->build_codex_installer_url($site_url, $site_name, $suggest_insecure_ssl);
+            $safe_slug = sanitize_title($site_name);
+            if (empty($safe_slug) && $host) {
+                $safe_slug = sanitize_title($host);
+            }
+            if (empty($safe_slug)) {
+                $safe_slug = 'bricks-site';
+            }
+            $tmp_script = '/tmp/bricks-' . $safe_slug . '-install-codex.sh';
+            $codex_command_1 = "curl -fsSL " . escapeshellarg($codex_script_url) . " -o " . escapeshellarg($tmp_script);
+            $codex_command_2 = "bash " . escapeshellarg($tmp_script);
+        }
         ?>
         <div class="wrap bricks-mcp-admin">
             <h1>🔌 Bricks MCP — Connexion à Claude</h1>
@@ -2593,6 +2615,35 @@ class BricksMCPServer {
 
                     <div style="margin-top:16px;padding:16px;background:#f0fdf4;border-radius:4px;border-left:3px solid #00a32a;">
                         <strong>🧠 Skill bricks-builder embarqué :</strong> ce plugin Claude inclut <strong>7000+ lignes de doc Bricks</strong> (patterns, pitfalls, workflow, design web, SEO, structures JSON validées). Claude saura immédiatement comment convertir du HTML/CSS en Bricks, éviter les pièges connus et appliquer les bonnes pratiques.
+                    </div>
+                <?php endif; ?>
+            </div>
+
+            <!-- ÉTAPE 3 : Installer dans Codex -->
+            <div style="background:#fff;padding:24px;margin:16px 0;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);border-left:4px solid <?php echo $is_configured ? '#7c3aed' : '#c3c4c7'; ?>;<?php echo $is_configured ? '' : 'opacity:.6;'; ?>">
+                <h2 style="margin-top:0;">Étape 3 — Connecter à Codex</h2>
+                <p>Copie-colle les <strong>2 commandes</strong> ci-dessous dans le Terminal. Elles vont créer le plugin local Codex, récupérer le skill bricks-builder à jour depuis GitHub et configurer le MCP de ce site automatiquement.</p>
+
+                <?php if (!$is_configured): ?>
+                    <p style="color:#dba617;font-weight:600;">⚠ Génère d'abord la clé API à l'étape 1.</p>
+                <?php else: ?>
+                    <div style="background:#f5f3ff;border-left:4px solid #7c3aed;padding:12px 16px;margin:16px 0;border-radius:4px;">
+                        <strong>Bonus :</strong> la doc/skill n'est pas figée dans un fichier téléchargé. Le script va chercher le dossier <code>skill/</code> à jour sur GitHub au moment de l'installation. Si tu mets à jour la doc, il suffit de relancer ces 2 commandes.
+                    </div>
+
+                    <p style="margin:16px 0 8px;"><strong>Commande 1</strong></p>
+                    <textarea readonly onclick="this.select();" style="width:100%;min-height:58px;font-family:Menlo,Consolas,monospace;font-size:12px;"><?php echo esc_textarea($codex_command_1); ?></textarea>
+
+                    <p style="margin:16px 0 8px;"><strong>Commande 2</strong></p>
+                    <textarea readonly onclick="this.select();" style="width:100%;min-height:58px;font-family:Menlo,Consolas,monospace;font-size:12px;"><?php echo esc_textarea($codex_command_2); ?></textarea>
+
+                    <div style="margin-top:24px;padding:16px;background:#faf5ff;border-radius:4px;border-left:3px solid #7c3aed;">
+                        <strong>Notes :</strong>
+                        <ul style="margin:8px 0 0 20px;list-style:disc;">
+                            <li>Le lien de téléchargement du script est signé et valable 24h.</li>
+                            <li>Si Codex est déjà ouvert, relance-le après l'installation.</li>
+                            <li><?php echo $suggest_insecure_ssl ? 'Le mode SSL invalide a été activé automatiquement pour cette URL.' : 'Le mode SSL invalide n\'est pas activé par défaut.'; ?></li>
+                        </ul>
                     </div>
                 <?php endif; ?>
             </div>
@@ -2777,6 +2828,219 @@ class BricksMCPServer {
         readfile($tmp_file);
         @unlink($tmp_file);
         exit;
+    }
+
+    private function build_codex_installer_url($site_url, $label, $insecure_ssl = false) {
+        $site_url = untrailingslashit(esc_url_raw(trim($site_url)));
+        $label = sanitize_text_field($label);
+        if (empty($label)) {
+            $label = 'Mon site Bricks';
+        }
+
+        $expires = time() + DAY_IN_SECONDS;
+        $token = $this->build_codex_installer_token($site_url, $label, $insecure_ssl, $expires);
+
+        return add_query_arg([
+            'action'       => 'bricks_stream_codex_installer',
+            'site_url'     => $site_url,
+            'plugin_label' => $label,
+            'insecure_ssl' => $insecure_ssl ? '1' : '0',
+            'expires'      => $expires,
+            'token'        => $token,
+        ], admin_url('admin-post.php'));
+    }
+
+    private function build_codex_installer_token($site_url, $label, $insecure_ssl, $expires) {
+        $payload = implode('|', [
+            untrailingslashit((string) $site_url),
+            (string) $label,
+            $insecure_ssl ? '1' : '0',
+            (string) $expires,
+        ]);
+        return hash_hmac('sha256', $payload, wp_salt('auth'));
+    }
+
+    /**
+     * Stream public d'un script d'installation Codex protégé par URL signée.
+     * La clé API reste côté serveur WordPress et n'apparaît jamais dans la commande.
+     */
+    public function handle_stream_codex_installer() {
+        $site_url = isset($_GET['site_url']) ? wp_unslash($_GET['site_url']) : home_url();
+        $site_url = untrailingslashit(esc_url_raw(trim($site_url)));
+        $label = isset($_GET['plugin_label']) ? wp_unslash($_GET['plugin_label']) : get_bloginfo('name');
+        $label = sanitize_text_field($label);
+        $insecure_ssl = !empty($_GET['insecure_ssl']) && $_GET['insecure_ssl'] !== '0';
+        $expires = isset($_GET['expires']) ? (int) $_GET['expires'] : 0;
+        $token = isset($_GET['token']) ? sanitize_text_field(wp_unslash($_GET['token'])) : '';
+
+        if (empty($label)) {
+            $label = 'Mon site Bricks';
+        }
+
+        if (!$expires || $expires < time()) {
+            wp_die('Lien expiré. Retourne dans WordPress pour régénérer les commandes Codex.', 'Lien expiré', ['response' => 403]);
+        }
+
+        $expected_token = $this->build_codex_installer_token($site_url, $label, $insecure_ssl, $expires);
+        if (empty($token) || !hash_equals($expected_token, $token)) {
+            wp_die('Signature invalide.', 'Erreur', ['response' => 403]);
+        }
+
+        $api_key = get_option('bricks_mcp_api_key');
+        if (empty($api_key)) {
+            wp_die('Clé API manquante. Génère-la d\'abord dans WordPress.', 'Erreur', ['response' => 400]);
+        }
+
+        $slug = sanitize_title($label);
+        if (empty($slug)) {
+            $slug = sanitize_title(parse_url($site_url, PHP_URL_HOST));
+        }
+        $plugin_name = 'bricks-' . $slug;
+        $github_repo = untrailingslashit(get_option('bricks_mcp_github_repo', BRICKS_MCP_DEFAULT_GITHUB_REPO));
+        $archive_url = $github_repo . '/archive/refs/heads/main.tar.gz';
+
+        $env_vars = [
+            'WORDPRESS_URL' => $site_url,
+            'API_KEY'       => $api_key,
+        ];
+        if ($insecure_ssl) {
+            $env_vars['INSECURE_SSL'] = 'true';
+        }
+
+        $plugin_manifest = wp_json_encode([
+            'name'        => $plugin_name,
+            'version'     => '1.0.0',
+            'description' => sprintf('Connecte Codex au site %s pour piloter Bricks Builder.', $label),
+            'author'      => [
+                'name' => 'Bricks Builder MCP',
+                'url'  => 'https://github.com/Scott1012/bricks-builder-mcp',
+            ],
+            'skills'      => './skills/',
+            'mcpServers'  => './.mcp.json',
+            'interface'   => [
+                'displayName'      => $label,
+                'shortDescription' => 'Pilote Bricks Builder pour ce site',
+                'longDescription'  => sprintf('Plugin local Codex généré automatiquement pour connecter le site %s à Bricks Builder MCP.', $label),
+                'developerName'    => 'Bricks Builder MCP',
+                'category'         => 'Productivity',
+                'capabilities'     => ['Interactive', 'Write'],
+                'websiteURL'       => 'https://github.com/Scott1012/bricks-builder-mcp',
+            ],
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        $mcp_json = wp_json_encode([
+            'mcpServers' => [
+                'bricks-mcp' => [
+                    'command' => 'npx',
+                    'args'    => ['-y', 'bricks-builder-mcp'],
+                    'env'     => $env_vars,
+                ],
+            ],
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        $installer = $this->build_codex_installer_script(
+            $plugin_name,
+            $plugin_manifest,
+            $mcp_json,
+            $archive_url
+        );
+
+        if (ob_get_length()) {
+            ob_end_clean();
+        }
+
+        header('Content-Type: text/x-shellscript; charset=utf-8');
+        header('Content-Disposition: inline; filename="' . $plugin_name . '-install-codex.sh"');
+        header('Cache-Control: no-cache, no-store, must-revalidate');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+        echo $installer;
+        exit;
+    }
+
+    private function build_codex_installer_script($plugin_name, $plugin_manifest, $mcp_json, $archive_url) {
+        $plugin_name_py = wp_json_encode($plugin_name, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $marketplace_entry_py = wp_json_encode([
+            'name' => $plugin_name,
+            'source' => [
+                'source' => 'local',
+                'path'   => './plugins/' . $plugin_name,
+            ],
+            'policy' => [
+                'installation'   => 'AVAILABLE',
+                'authentication' => 'ON_INSTALL',
+            ],
+            'category' => 'Productivity',
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        return "#!/bin/bash\n"
+            . "set -euo pipefail\n\n"
+            . "PLUGIN_NAME=" . escapeshellarg($plugin_name) . "\n"
+            . "ARCHIVE_URL=" . escapeshellarg($archive_url) . "\n"
+            . "PLUGIN_ROOT=\"\$HOME/plugins/\$PLUGIN_NAME\"\n"
+            . "PLUGIN_SKILL_DIR=\"\$PLUGIN_ROOT/skills/bricks-builder\"\n"
+            . "PLUGIN_META_DIR=\"\$PLUGIN_ROOT/.codex-plugin\"\n"
+            . "MARKETPLACE_DIR=\"\$HOME/.agents/plugins\"\n"
+            . "TMP_DIR=\"\$(mktemp -d)\"\n\n"
+            . "cleanup() {\n"
+            . "  rm -rf \"\$TMP_DIR\"\n"
+            . "}\n"
+            . "trap cleanup EXIT\n\n"
+            . "need_cmd() {\n"
+            . "  if ! command -v \"\$1\" >/dev/null 2>&1; then\n"
+            . "    echo \"Commande manquante : \$1\" >&2\n"
+            . "    exit 1\n"
+            . "  fi\n"
+            . "}\n\n"
+            . "need_cmd curl\n"
+            . "need_cmd tar\n"
+            . "need_cmd python3\n\n"
+            . "mkdir -p \"\$PLUGIN_META_DIR\" \"\$PLUGIN_SKILL_DIR\" \"\$MARKETPLACE_DIR\"\n\n"
+            . "cat > \"\$PLUGIN_META_DIR/plugin.json\" <<'JSON'\n"
+            . $plugin_manifest . "\n"
+            . "JSON\n\n"
+            . "cat > \"\$PLUGIN_ROOT/.mcp.json\" <<'JSON'\n"
+            . $mcp_json . "\n"
+            . "JSON\n\n"
+            . "echo \"Téléchargement du skill bricks-builder depuis GitHub...\"\n"
+            . "curl -fsSL \"\$ARCHIVE_URL\" -o \"\$TMP_DIR/repo.tar.gz\"\n"
+            . "tar -xzf \"\$TMP_DIR/repo.tar.gz\" -C \"\$TMP_DIR\"\n"
+            . "SOURCE_SKILL_FILE=\"\$(find \"\$TMP_DIR\" -type f -name 'SKILL.md' -path '*/skill/SKILL.md' | head -n 1)\"\n"
+            . "if [ -z \"\$SOURCE_SKILL_FILE\" ]; then\n"
+            . "  echo \"Impossible de trouver le dossier skill/ dans l'archive GitHub.\" >&2\n"
+            . "  exit 1\n"
+            . "fi\n"
+            . "SOURCE_SKILL_DIR=\"\${SOURCE_SKILL_FILE%/SKILL.md}\"\n"
+            . "rm -rf \"\$PLUGIN_SKILL_DIR\"\n"
+            . "mkdir -p \"\$PLUGIN_SKILL_DIR\"\n"
+            . "cp -R \"\$SOURCE_SKILL_DIR\"/. \"\$PLUGIN_SKILL_DIR/\"\n\n"
+            . "python3 <<'PY'\n"
+            . "import json\n"
+            . "import os\n\n"
+            . "marketplace_path = os.path.expanduser('~/.agents/plugins/marketplace.json')\n"
+            . "plugin_name = " . $plugin_name_py . "\n"
+            . "entry = " . $marketplace_entry_py . "\n\n"
+            . "if os.path.exists(marketplace_path):\n"
+            . "    with open(marketplace_path, 'r', encoding='utf-8') as fh:\n"
+            . "        data = json.load(fh)\n"
+            . "else:\n"
+            . "    data = {\n"
+            . "        'name': 'personal',\n"
+            . "        'interface': {'displayName': 'Personal'},\n"
+            . "        'plugins': [],\n"
+            . "    }\n\n"
+            . "plugins = [p for p in data.get('plugins', []) if p.get('name') != plugin_name]\n"
+            . "plugins.append(entry)\n"
+            . "data['plugins'] = plugins\n"
+            . "data.setdefault('name', 'personal')\n"
+            . "data.setdefault('interface', {'displayName': 'Personal'})\n\n"
+            . "with open(marketplace_path, 'w', encoding='utf-8') as fh:\n"
+            . "    json.dump(data, fh, ensure_ascii=False, indent=2)\n"
+            . "    fh.write('\\n')\n"
+            . "PY\n\n"
+            . "echo\n"
+            . "echo \"Installation Codex terminée pour \$PLUGIN_NAME.\"\n"
+            . "echo \"Relance Codex si le plugin n'apparaît pas tout de suite.\"\n";
     }
 
     // =====================================================
