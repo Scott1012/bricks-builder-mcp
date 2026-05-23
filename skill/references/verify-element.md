@@ -1,6 +1,7 @@
 # ⭐ verify_element — Vérification en 1 appel
 
 > Disponible depuis Bricks MCP v3.7 / MCP server v3.6. **L'outil obligatoire après chaque batch_add ou update_element significatif.**
+> **v3.10** (mai 2026) : ajout du multi-viewport en 1 call + 3 catégories de checks généralistes (cohérence siblings, containers vides, santé des médias).
 
 ---
 
@@ -93,13 +94,55 @@ verify_element (parent de la section, en desktop)
 Une section faite en desktop doit aussi marcher en mobile. À la fin de chaque section importante :
 
 ```js
-verify_element({pageId, elementId, viewport: "desktop"})
-verify_element({pageId, elementId, viewport: "mobile_portrait"})
+// v3.10 — 1 seul call, plusieurs viewports
+verify_element({
+  pageId, elementId,
+  viewports: ["desktop", "mobile_portrait"]  // ou ["desktop", "tablet", "mobile_portrait"]
+})
 ```
+
+Retourne **un report + un screenshot par viewport** dans la même réponse. Tu vois les 2 ou 3 versions côte à côte et tu détectes immédiatement ce qui casse au resize.
 
 Viewports disponibles : `desktop` (1920×1080), `tablet` (991×1200), `mobile_landscape` (767×600), `mobile_portrait` (478×800).
 
+> Compat ancien : `viewport: "desktop"` (singulier) continue de marcher. Si tu passes `viewports`, le `viewport` est ignoré.
+
 Si mobile casse, ajouter `_padding:mobile_portrait`, `_widthMax:mobile_portrait`, etc. (cf. `pitfalls.md` § 8).
+
+---
+
+## v3.10 — Catégories de checks
+
+Chaque check porte une `severity` (`critical` | `warning` | `info`) pour t'aider à prioriser. Les `ok: false` comptent dans le score, peu importe la sévérité.
+
+### Cohérence siblings
+Compare l'élément à ses frères directs (Bricks `brxe-*`) :
+- **text-align mixé** entre frères → `warning`. Quand un H2 est en `left` et le sous-titre en `center` sans intention design, c'est presque toujours un bug. Aligner les deux ou justifier le choix.
+- **Jumps de font-size > 2.5x** entre frères → `info`. Normal pour H1 / sous-titre, à vérifier sinon.
+
+### Containers vides anormaux
+Tout descendant Bricks ≥ 50×50px sans `<text>`, sans `<img|svg|video>`, sans `<a|button>`, sans `background-image` → `warning`. Bug fréquent : un dot censé être 6px qui devient 180px parce que le parent est en `align-items: stretch`. Solution : `aspect-ratio` fixe sur le dot ou ajouter du contenu.
+
+### Santé des médias
+- **Image non chargée** (`naturalWidth = 0`) → `critical`. Détecte les `<img>` cassées : lazy-load qui ne se déclenche pas, 404, URL mal construite.
+- **alt manquant** → `warning`. Bloque l'accessibilité et le SEO. Renseigner via `upload_local_file({alt})`.
+- **Vidéo pas prête** (`readyState < 2`) → `warning`. Peut être normal si autoplay désactivé sur mobile.
+
+### Désactiver une catégorie
+
+Si tu travailles sur une section où un check fait trop de bruit (ex: pages décoratives où les containers vides sont volontaires) :
+
+```js
+verify_element({
+  pageId, elementId,
+  checks: {
+    sibling_coherence: false,
+    empty_containers: false,
+  }
+})
+```
+
+Les autres catégories restent actives. Par défaut, **toutes activées**.
 
 ---
 

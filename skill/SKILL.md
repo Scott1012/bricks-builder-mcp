@@ -1,10 +1,10 @@
 ---
 name: bricks-builder
-version: 1.2.0
-description: Pilote Bricks Builder (page builder WordPress) pour créer, modifier et convertir des pages. Se déclenche pour toute tâche impliquant Bricks - convertir du HTML/CSS, créer une page, ajouter ou modifier des sections, des éléments, gérer le responsive, optimiser le SEO d'un site Bricks. Supporte aussi le seeding de Custom Post Types (CPT) avec ACF/Meta Box, taxonomies. Inclut une bibliothèque de patterns, pièges connus, workflow recommandé, et un guide complet basé sur 640+ éléments testés en production.
+version: 1.4.0
+description: Pilote Bricks Builder (page builder WordPress) pour créer, modifier et convertir des pages. Se déclenche pour toute tâche impliquant Bricks - convertir du HTML/CSS, créer une page, ajouter ou modifier des sections, des éléments, gérer le responsive, optimiser le SEO d'un site Bricks. Supporte aussi le seeding de Custom Post Types (CPT) avec ACF/Meta Box, taxonomies. v1.3+ : verify_element multi-viewport + 3 checks généralistes. v1.4+ : audit_page (audit global d'une page en 1 call, fullpage screenshot avec annotations rouges/oranges/jaunes sur les zones à problème). Inclut une bibliothèque de patterns, pièges connus, workflow recommandé, et un guide complet basé sur 640+ éléments testés en production.
 ---
 
-# 🧱 Bricks Builder — Skill Complet (v1.2.0)
+# 🧱 Bricks Builder — Skill Complet (v1.4.0)
 
 Skill pour piloter **Bricks Builder** (page builder WordPress) via les outils MCP. Couvre la création, modification et conversion de pages, le design responsive, le SEO et tous les patterns testés en production.
 
@@ -101,27 +101,73 @@ take_screenshot({ url, width: 1920, waitForMS: 2000 })
 **Plus de "ça me semble bon"**. Après chaque section ou modification non-triviale, appelle :
 
 ```js
+// Mode classique (1 viewport)
 verify_element({pageId, elementId, viewport: "desktop"})
-// Retourne : screenshot crop + report {score, checks: [{ok, label, expected, got, hint}]}
+
+// v3.10 — Multi-viewport en 1 call (recommandé pour valider le responsive)
+verify_element({
+  pageId, elementId,
+  viewports: ["desktop", "mobile_portrait"]
+})
+// → 1 report + 1 screenshot par viewport, dans la même réponse
 ```
 
-L'outil :
-- Lance un browser headless (waitForMS: 2000 intégré)
-- Compare computed style vs settings attendus (gap, padding, typography, border-radius)
-- Détecte fonts non chargées, console errors, débordement horizontal, children manquants
-- Te montre une **image** (que tu peux voir) + un **report structuré** (que tu peux exploiter)
+L'outil détecte automatiquement :
+- **Computed styles** vs settings attendus (gap, padding, typography, border-radius)
+- **Fonts non chargées**, console errors, débordement horizontal, children manquants
+- **v3.10 — Cohérence siblings** : text-align mixé entre frères directs (souvent un bug visuel), jumps font-size > 2.5x (info)
+- **v3.10 — Containers vides anormaux** : tout bloc ≥ 50×50px sans texte, image ni interactif (attrape les dots-géants, wrappers vides écrasés par `align-items: stretch`)
+- **v3.10 — Santé des médias** : `naturalWidth > 0` sur toutes les `<img>` (détecte lazy-load cassé), `readyState ≥ 2` sur les `<video>`, alt présents (SEO/a11y)
+
+Te montre une **image** (que tu peux voir) + un **report structuré** avec `severity: critical | warning | info` et `hint` pour corriger.
+
+**Désactiver une catégorie de checks** si elle bruite trop :
+```js
+verify_element({
+  pageId, elementId,
+  checks: { sibling_coherence: false }  // toutes les autres restent actives
+})
+```
 
 **Workflow imposé** :
 ```
 batch_add (1 section, ≤ 10 éléments)
    ↓
-verify_element (le PARENT de la section)
+verify_element (le PARENT de la section, viewports: ["desktop", "mobile_portrait"])
    ↓
-   ├─ score ≥ 9/10 → next section
-   └─ score < 9/10 → corriger avec les hints → re-verify
+   ├─ score ≥ 9/10 sur TOUS les viewports → next section
+   └─ score < 9/10 sur l'un → corriger avec les hints → re-verify
 ```
 
 Détails et exemples : `references/verify-element.md`.
+
+### 9bis. ⭐ `audit_page` — Audit GLOBAL d'une page en 1 call (v3.11+)
+
+Complémentaire à `verify_element`. Quand tu veux **un état des lieux complet** d'une page avant ou après refonte, plutôt que de vérifier section par section :
+
+```js
+audit_page({pageId: 43, viewports: ["desktop", "mobile_portrait"]})
+// → 1 fullpage screenshot par viewport AVEC des cadres colorés dessinés sur les zones problématiques :
+//    rouge = critical, orange = warning, jaune = info
+//    Chaque cadre est numéroté → correspond à une issue dans le JSON retourné
+//
+// + report consolidé : {severityCounts: {critical: 2, warning: 5, info: 0}, issues: [...]}
+```
+
+Checks effectués sur **tous les éléments Bricks** de la page (pas seulement 1) :
+- **Containers vides anormaux** (≥ 50×50px sans contenu)
+- **Images cassées** (`naturalWidth = 0`) et alt manquants
+- **text-align mixé** entre frères directs Bricks
+- **Débordement horizontal global** de la page
+
+**Quand l'utiliser** :
+- Au démarrage d'une refonte (état initial)
+- Après une grosse vague de modifications (plusieurs sections d'un coup)
+- Pour préparer une démo client : 1 screenshot annoté > 200 lignes de JSON
+
+**Quand l'éviter** :
+- Pour valider 1 section précise → `verify_element` est plus rapide et précis
+- Pendant le développement itératif → `verify_element` après chaque batch_add
 
 ### 10. ⭐ CSS/JS au BON endroit (page-specific vs global)
 
