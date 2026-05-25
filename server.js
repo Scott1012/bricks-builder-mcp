@@ -356,7 +356,7 @@ console.error = (...args) => {
 };
 
 logToFile('========================================');
-logToFile('DÉMARRAGE BRICKS MCP SERVER v3.0');
+logToFile('DÉMARRAGE BRICKS MCP SERVER v3.12.0');
 logToFile('========================================');
 
 // Configuration WordPress
@@ -384,7 +384,7 @@ if (!process.env.WORDPRESS_URL || !process.env.API_KEY) {
 const mcpServer = new Server(
   {
     name: "bricks-mcp-v3",
-    version: "3.0.0",
+    version: "3.12.0",
   },
   {
     capabilities: {
@@ -829,6 +829,31 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: { type: "object", properties: {} },
       },
       {
+        name: "get_element_schema",
+        description: "Découvre les éléments Bricks disponibles et leurs contrôles natifs depuis le registre runtime Bricks. Sans `element`, retourne le catalogue compact. Avec `element` (ex: button, image, form), retourne les contrôles/settings de cet élément + les settings hérités communs si includeInherited=true.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            element: {
+              type: "string",
+              description: "Nom technique Bricks de l'élément (ex: section, container, heading, text-basic, button, image). Si omis, retourne le catalogue compact.",
+            },
+            catalogOnly: {
+              type: "boolean",
+              description: "Forcer le mode catalogue compact même si element est absent. Défaut: true quand element est omis.",
+            },
+            includeInherited: {
+              type: "boolean",
+              description: "Inclure les contrôles de style communs (_padding, _typography, _background, etc.) avec un schema d'élément ciblé. Défaut: true.",
+            },
+            raw: {
+              type: "boolean",
+              description: "Inclure une version assainie des contrôles Bricks bruts. Plus lourd en tokens, à utiliser seulement pour debug.",
+            },
+          },
+        },
+      },
+      {
         name: "update_global_styles",
         description: "Met à jour les settings globaux Bricks via fusion récursive. Utile pour appliquer une typo de site ou une convention CSS partout d'un coup. Seuls les champs fournis sont modifiés.",
         inputSchema: {
@@ -1172,6 +1197,46 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
               },
             },
             maxAnnotations: { type: "number", description: "Limite d'annotations dessinées sur le screenshot (défaut: 30, pour éviter d'écraser visuellement la page)" },
+          },
+          required: ["pageId"],
+        },
+      },
+      {
+        name: "audit_design_page",
+        description: "⭐ AUDIT DESIGN GÉNÉRAL d'une page Bricks. Capture la page en multi-viewport, découpe les sections visibles, extrait le contexte DOM/design, puis retourne un dossier de revue visuelle pour l'IA. À utiliser pour détecter harmonie, hiérarchie, rythme, cohérence, sensation premium, responsive et zones qui font 'pas fini'. Ne remplace pas audit_page : il complète l'audit technique par une vraie passe webdesign.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pageId: { type: "number", description: "L'ID de la page WP à auditer" },
+            viewports: {
+              type: "array",
+              items: { type: "string", enum: ["desktop", "tablet", "mobile_landscape", "mobile_portrait"] },
+              description: "Viewports à capturer (défaut: ['desktop', 'mobile_portrait']).",
+            },
+            brief: {
+              type: "string",
+              description: "Contexte métier/design optionnel pour calibrer l'audit (ex: artisan carreleur premium local, objectif devis, cible particuliers).",
+            },
+            maxSections: {
+              type: "number",
+              description: "Nombre max de sections cropées par viewport (défaut: 8). Le fullpage reste inclus.",
+            },
+            maxCropHeight: {
+              type: "number",
+              description: "Hauteur max d'un crop de section en px (défaut: 1200) pour éviter des images trop lourdes.",
+            },
+            includeFullPage: {
+              type: "boolean",
+              description: "Inclure le screenshot fullpage propre par viewport (défaut: true).",
+            },
+            includeSectionCrops: {
+              type: "boolean",
+              description: "Inclure les crops de sections principales (défaut: true).",
+            },
+            sectionSelector: {
+              type: "string",
+              description: "Sélecteur CSS optionnel pour découper les sections (défaut: sections Bricks sous #brx-content, fallback main/body).",
+            },
           },
           required: ["pageId"],
         },
@@ -1636,6 +1701,16 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "get_global_styles":
         console.error(`[LOG] Exécution: get_global_styles`);
         result = await callWordPressAPI("/get-global-styles", "GET");
+        break;
+
+      case "get_element_schema":
+        console.error(`[LOG] Exécution: get_element_schema`);
+        result = await callWordPressAPI("/get-element-schema", "POST", {
+          element: args.element || "",
+          catalogOnly: args.catalogOnly,
+          includeInherited: args.includeInherited,
+          raw: args.raw || false,
+        });
         break;
 
       case "update_global_styles":
@@ -2531,6 +2606,394 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: responseContent };
       }
 
+      // ===== v3.12 — AUDIT_DESIGN_PAGE (dossier de revue visuelle pour IA) =====
+      case "audit_design_page": {
+        const pageId = args.pageId;
+        const viewportList = (Array.isArray(args.viewports) && args.viewports.length > 0)
+          ? args.viewports
+          : ["desktop", "mobile_portrait"];
+        const maxSections = Number.isFinite(args.maxSections)
+          ? Math.max(1, Math.min(24, Math.round(args.maxSections)))
+          : 8;
+        const maxCropHeight = Number.isFinite(args.maxCropHeight)
+          ? Math.max(400, Math.min(2400, Math.round(args.maxCropHeight)))
+          : 1200;
+        const includeFullPage = args.includeFullPage !== false;
+        const includeSectionCrops = args.includeSectionCrops !== false;
+        const sectionSelector = args.sectionSelector || "#brx-content > .brxe-section, main > .brxe-section, .brxe-section";
+        const brief = args.brief || "";
+
+        // Récupérer l'URL de la page via /list-pages pour rester compatible avec les plugins déjà installés.
+        const allPages = await callWordPressAPI("/list-pages", "GET");
+        const pageMeta = (Array.isArray(allPages) ? allPages : []).find(p => p.id === pageId);
+        if (!pageMeta) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: `Page ${pageId} introuvable dans list_bricks_pages`, hint: "Vérifie l'ID via list_bricks_pages." }, null, 2) }] };
+        }
+        const pageUrl = pageMeta.url;
+
+        const perViewport = [];
+        const imageContent = [];
+
+        for (const viewport of viewportList) {
+          let page;
+          try {
+            page = await getNewPage(viewport);
+          } catch (browserErr) {
+            perViewport.push({
+              viewport,
+              success: false,
+              error: browserErr.message,
+              hint: "Installation Chromium requise pour audit_design_page. Lance : npx playwright install chromium",
+            });
+            continue;
+          }
+
+          try {
+            await page.goto(pageUrl, { waitUntil: 'load', timeout: 30000 });
+            await page.waitForTimeout(1000);
+
+            // Même stratégie que audit_page : déclencher les lazy-load avant de capturer.
+            await page.evaluate(() => {
+              document.querySelectorAll('img[loading="lazy"]').forEach(img => {
+                img.loading = 'eager';
+              });
+            });
+            await page.evaluate(() => {
+              return new Promise(resolve => {
+                const totalHeight = document.documentElement.scrollHeight;
+                let scrolled = 0;
+                const step = 450;
+                const timer = setInterval(() => {
+                  window.scrollBy(0, step);
+                  scrolled += step;
+                  if (scrolled >= totalHeight) {
+                    clearInterval(timer);
+                    window.scrollTo(0, 0);
+                    setTimeout(resolve, 500);
+                  }
+                }, 70);
+              });
+            });
+            try {
+              await page.waitForLoadState('networkidle', { timeout: 12000 });
+            } catch {}
+            await page.waitForTimeout(500);
+
+            const designContext = await page.evaluate(({ sectionSelector, maxSections }) => {
+              const normalizeText = (value, max = 260) => {
+                const text = String(value || '').replace(/\s+/g, ' ').trim();
+                return text.length > max ? text.slice(0, max - 1) + '…' : text;
+              };
+              const num = (value) => Number.parseFloat(value) || 0;
+              const bbox = (el) => {
+                const rect = el.getBoundingClientRect();
+                return {
+                  x: Math.round(rect.left + window.scrollX),
+                  y: Math.round(rect.top + window.scrollY),
+                  w: Math.round(rect.width),
+                  h: Math.round(rect.height),
+                };
+              };
+              const isVisible = (el) => {
+                if (!el || !el.getBoundingClientRect) return false;
+                const rect = el.getBoundingClientRect();
+                if (rect.width < 2 || rect.height < 2) return false;
+                const cs = getComputedStyle(el);
+                return cs.display !== 'none' && cs.visibility !== 'hidden' && num(cs.opacity) > 0.02;
+              };
+              const labelFor = (el) => {
+                const tag = el.tagName.toLowerCase();
+                const id = el.id ? `#${el.id}` : '';
+                const classes = Array.from(el.classList || []).slice(0, 5).map(c => `.${c}`).join('');
+                return `${tag}${id}${classes}`;
+              };
+              const pickComputed = (el) => {
+                const cs = getComputedStyle(el);
+                return {
+                  display: cs.display,
+                  position: cs.position,
+                  backgroundColor: cs.backgroundColor,
+                  color: cs.color,
+                  fontFamily: cs.fontFamily,
+                  fontSize: cs.fontSize,
+                  fontWeight: cs.fontWeight,
+                  lineHeight: cs.lineHeight,
+                  textAlign: cs.textAlign,
+                  padding: {
+                    top: cs.paddingTop,
+                    right: cs.paddingRight,
+                    bottom: cs.paddingBottom,
+                    left: cs.paddingLeft,
+                  },
+                  margin: {
+                    top: cs.marginTop,
+                    right: cs.marginRight,
+                    bottom: cs.marginBottom,
+                    left: cs.marginLeft,
+                  },
+                  gap: cs.gap,
+                  maxWidth: cs.maxWidth,
+                  width: cs.width,
+                  overflow: `${cs.overflowX}/${cs.overflowY}`,
+                };
+              };
+
+              let sectionNodes = [];
+              try {
+                sectionNodes = Array.from(document.querySelectorAll(sectionSelector)).filter(isVisible);
+              } catch {}
+              if (sectionNodes.length === 0) {
+                const root = document.querySelector('#brx-content') || document.querySelector('main') || document.body;
+                sectionNodes = Array.from(root.children || []).filter(isVisible);
+              }
+
+              const seen = new Set();
+              sectionNodes = sectionNodes.filter(el => {
+                if (seen.has(el)) return false;
+                seen.add(el);
+                const rect = el.getBoundingClientRect();
+                return rect.width >= 120 && rect.height >= 80;
+              });
+
+              const pageHeadings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,.brxe-heading'))
+                .filter(isVisible)
+                .slice(0, 40)
+                .map(el => {
+                  const cs = getComputedStyle(el);
+                  return {
+                    text: normalizeText(el.innerText || el.textContent, 120),
+                    tag: el.tagName.toLowerCase(),
+                    label: labelFor(el),
+                    fontSizePx: Math.round(num(cs.fontSize)),
+                    fontWeight: cs.fontWeight,
+                    lineHeight: cs.lineHeight,
+                    color: cs.color,
+                    bbox: bbox(el),
+                  };
+                });
+
+              const pageButtons = Array.from(document.querySelectorAll('a,button,.brxe-button'))
+                .filter(el => isVisible(el) && normalizeText(el.innerText || el.textContent, 80).length > 0)
+                .slice(0, 40)
+                .map(el => {
+                  const cs = getComputedStyle(el);
+                  return {
+                    text: normalizeText(el.innerText || el.textContent, 80),
+                    label: labelFor(el),
+                    fontSizePx: Math.round(num(cs.fontSize)),
+                    lineHeight: cs.lineHeight,
+                    whiteSpace: cs.whiteSpace,
+                    bbox: bbox(el),
+                  };
+                });
+
+              const sections = sectionNodes.map((section, index) => {
+                const headings = Array.from(section.querySelectorAll('h1,h2,h3,h4,h5,h6,.brxe-heading'))
+                  .filter(isVisible)
+                  .slice(0, 8)
+                  .map(el => {
+                    const cs = getComputedStyle(el);
+                    return {
+                      text: normalizeText(el.innerText || el.textContent, 140),
+                      tag: el.tagName.toLowerCase(),
+                      label: labelFor(el),
+                      fontSizePx: Math.round(num(cs.fontSize)),
+                      fontWeight: cs.fontWeight,
+                      lineHeight: cs.lineHeight,
+                      textAlign: cs.textAlign,
+                      bbox: bbox(el),
+                    };
+                  });
+
+                const ctas = Array.from(section.querySelectorAll('a,button,.brxe-button'))
+                  .filter(el => isVisible(el) && normalizeText(el.innerText || el.textContent, 80).length > 0)
+                  .slice(0, 8)
+                  .map(el => {
+                    const cs = getComputedStyle(el);
+                    return {
+                      text: normalizeText(el.innerText || el.textContent, 80),
+                      label: labelFor(el),
+                      fontSizePx: Math.round(num(cs.fontSize)),
+                      lineHeight: cs.lineHeight,
+                      whiteSpace: cs.whiteSpace,
+                      bbox: bbox(el),
+                    };
+                  });
+
+                const images = Array.from(section.querySelectorAll('img'))
+                  .filter(isVisible)
+                  .slice(0, 8)
+                  .map(img => ({
+                    src: img.currentSrc || img.src || '',
+                    alt: img.alt || '',
+                    natural: { width: img.naturalWidth || 0, height: img.naturalHeight || 0 },
+                    bbox: bbox(img),
+                  }));
+
+                const directChildren = Array.from(section.children || [])
+                  .filter(isVisible)
+                  .slice(0, 12)
+                  .map(el => ({
+                    label: labelFor(el),
+                    text: normalizeText(el.innerText || el.textContent, 90),
+                    bbox: bbox(el),
+                    display: getComputedStyle(el).display,
+                  }));
+
+                return {
+                  sectionNumber: index + 1,
+                  label: labelFor(section),
+                  id: section.id || null,
+                  classes: Array.from(section.classList || []),
+                  bbox: bbox(section),
+                  style: pickComputed(section),
+                  textPreview: normalizeText(section.innerText || section.textContent, 360),
+                  textLength: normalizeText(section.innerText || section.textContent, 100000).length,
+                  headings,
+                  ctas,
+                  images: {
+                    count: images.length,
+                    missingAlt: images.filter(i => !i.alt.trim()).length,
+                    samples: images,
+                  },
+                  directChildren,
+                };
+              });
+
+              return {
+                title: document.title,
+                url: location.href,
+                pageDimensions: {
+                  width: document.documentElement.clientWidth,
+                  height: document.documentElement.scrollHeight,
+                  scrollWidth: document.documentElement.scrollWidth,
+                },
+                body: pickComputed(document.body),
+                contentRoot: document.querySelector('#brx-content') ? '#brx-content' : (document.querySelector('main') ? 'main' : 'body'),
+                sectionsTotal: sections.length,
+                sections: sections.slice(0, maxSections),
+                headingInventory: pageHeadings,
+                ctaInventory: pageButtons,
+              };
+            }, { sectionSelector, maxSections });
+
+            const viewportImages = [];
+
+            if (includeFullPage) {
+              const fullRef = `${viewport}:fullpage`;
+              const buf = await page.screenshot({ type: 'jpeg', quality: 78, fullPage: true });
+              imageContent.push({
+                ref: fullRef,
+                label: `${viewport} — page complète`,
+                mimeType: "image/jpeg",
+                data: buf.toString('base64'),
+              });
+              viewportImages.push({ ref: fullRef, kind: "fullpage" });
+            }
+
+            if (includeSectionCrops) {
+              const pageDimensions = designContext.pageDimensions || {};
+              const pageWidth = Math.max(pageDimensions.scrollWidth || 0, pageDimensions.width || 0, 1);
+              const pageHeight = Math.max(pageDimensions.height || 0, 1);
+              const margin = 12;
+
+              for (const section of designContext.sections) {
+                const box = section.bbox;
+                if (!box || box.w < 20 || box.h < 20) continue;
+                const clip = {
+                  x: Math.max(0, box.x - margin),
+                  y: Math.max(0, box.y - margin),
+                  width: Math.min(pageWidth - Math.max(0, box.x - margin), box.w + margin * 2),
+                  height: Math.min(pageHeight - Math.max(0, box.y - margin), Math.min(box.h + margin * 2, maxCropHeight)),
+                };
+                if (clip.width < 20 || clip.height < 20) continue;
+                const ref = `${viewport}:section-${section.sectionNumber}`;
+                try {
+                  const buf = await page.screenshot({ type: 'jpeg', quality: 82, clip });
+                  imageContent.push({
+                    ref,
+                    label: `${viewport} — section ${section.sectionNumber} — ${section.label}`,
+                    mimeType: "image/jpeg",
+                    data: buf.toString('base64'),
+                  });
+                  section.cropImageRef = ref;
+                  section.cropNote = box.h > maxCropHeight ? `Crop tronqué à ${maxCropHeight}px de haut.` : "Crop complet.";
+                  viewportImages.push({ ref, kind: "section", sectionNumber: section.sectionNumber });
+                } catch (cropErr) {
+                  section.cropError = cropErr.message;
+                }
+              }
+            }
+
+            perViewport.push({
+              viewport,
+              success: true,
+              pageDimensions: designContext.pageDimensions,
+              body: designContext.body,
+              contentRoot: designContext.contentRoot,
+              sectionsTotal: designContext.sectionsTotal,
+              sectionsCaptured: designContext.sections.length,
+              headingInventory: designContext.headingInventory,
+              ctaInventory: designContext.ctaInventory,
+              sections: designContext.sections,
+              images: viewportImages,
+            });
+          } finally {
+            if (page && !page.isClosed()) {
+              await page.close().catch(() => {});
+            }
+          }
+        }
+
+        const summary = {
+          success: true,
+          tool: "audit_design_page",
+          pageId,
+          pageUrl,
+          pageTitle: pageMeta.title,
+          brief,
+          method: "Ce tool ne fait pas une liste de règles hardcodées. Il fournit screenshots + crops + contexte DOM pour une critique IA générale de webdesign.",
+          reviewInstructionForAI: [
+            "Inspecte les images avant de conclure. Ne te limite pas aux métriques DOM.",
+            "Cherche les problèmes d'harmonie globale : hiérarchie, rythme vertical, densité, largeur de contenu, alignements, équilibre image/texte, cohérence entre sections, typographie, CTA, sensation premium, confiance, responsive.",
+            "Signale aussi les zones qui semblent correctes techniquement mais faibles visuellement : trop template, vide mal placé, élément qui flotte, rupture de style, section trop lourde/légère, manque d'intention.",
+            "Ne transforme pas chaque différence en bug. Priorise les points qu'un humain exigeant verrait en pleine page.",
+            "Pour chaque finding : zone/section, viewport, sévérité, confiance, pourquoi ça nuit au design, correction proposée.",
+          ],
+          suggestedOutputShape: {
+            findings: [
+              {
+                severity: "critical|major|minor",
+                confidence: "high|medium|low",
+                viewport: "desktop|tablet|mobile_portrait",
+                section: "section number or page area",
+                issue: "description courte",
+                whyItMatters: "impact design/UX",
+                suggestedFix: "action concrète",
+              },
+            ],
+            globalRead: "lecture générale de la page",
+            whatToValidateWithMathieu: "points subjectifs à faire trancher",
+          },
+          imageOrder: imageContent.map((img, index) => ({
+            index: index + 1,
+            ref: img.ref,
+            label: img.label,
+          })),
+          viewports: perViewport,
+        };
+
+        const responseContent = [
+          { type: "text", text: JSON.stringify(summary, null, 2) },
+        ];
+        for (const img of imageContent) {
+          responseContent.push({ type: "text", text: `Image ${imageContent.indexOf(img) + 1} — ${img.label} — ref: ${img.ref}` });
+          responseContent.push({ type: "image", data: img.data, mimeType: img.mimeType });
+        }
+
+        return { content: responseContent };
+      }
+
       // ===== v3.6.0 — FEEDBACK SYSTEM =====
       case "report_missing_feature":
         result = await callWordPressAPI("/report-missing-feature", "POST", {
@@ -2731,7 +3194,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);
-  console.error("[READY] MCP Bricks Builder v3.0 démarré et connecté");
+  console.error("[READY] MCP Bricks Builder v3.12.0 démarré et connecté");
 }
 
 main().catch(console.error);

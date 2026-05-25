@@ -1,8 +1,8 @@
 {
   "type": "module",
   "name": "bricks-builder-mcp",
-  "version": "3.11.5",
-  "description": "Serveur MCP pour piloter Bricks Builder (WordPress) depuis Claude — édition de pages, gestion d'éléments, réordonnancement des sections, vérification visuelle (verify_element), upload optimisé WebP. Communauté Discord : https://discord.gg/rX22zHRzH",
+  "version": "3.12.0",
+  "description": "Serveur MCP pour piloter Bricks Builder (WordPress) depuis Claude/Codex — édition de pages, gestion d'éléments, audit technique, audit design visuel, upload optimisé WebP. Communauté Discord : https://discord.gg/rX22zHRzH",
   "homepage": "https://discord.gg/rX22zHRzH",
   "main": "server.js",
   "bin": {
@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "start": "node server.js",
-    "postinstall": "node -e \"console.log('\\n[bricks-builder-mcp] Pour activer verify_element, lance UNE FOIS :\\n  npx playwright install chromium\\n')\"",
+    "postinstall": "node -e \"console.log('\\n[bricks-builder-mcp] Pour activer verify_element/audit_page/audit_design_page, lance UNE FOIS :\\n  npx playwright install chromium\\n')\"",
     "test": "echo \"No tests yet\" && exit 0"
   },
   "keywords": [

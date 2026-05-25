@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude et Codex. Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork et l'installeur Codex, avec skill bricks-builder embarqué.
- * Version: 4.2.0
+ * Version: 4.3.0
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '4.2.0');
+define('BRICKS_MCP_VERSION', '4.3.0');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -246,6 +246,11 @@ class BricksMCPServer {
         register_rest_route($namespace, '/health', [
             'methods' => 'GET',
             'callback' => [$this, 'api_health'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/get-element-schema', [
+            'methods' => 'POST',
+            'callback' => [$this, 'api_get_element_schema'],
             'permission_callback' => [$this, 'check_api_key']
         ]);
         register_rest_route($namespace, '/list-all-pages', [
@@ -1268,6 +1273,519 @@ class BricksMCPServer {
             'site_url'       => home_url(),
             'is_multisite'   => is_multisite(),
             'timestamp'      => current_time('mysql'),
+        ];
+    }
+
+    /**
+     * Endpoint POST /get-element-schema — Lit le registre runtime Bricks.
+     *
+     * Sans `element`, retourne le catalogue compact des éléments disponibles.
+     * Avec `element`, retourne les contrôles Bricks de cet élément.
+     */
+    public function api_get_element_schema($request) {
+        if (!class_exists('\Bricks\Elements')) {
+            return new WP_Error(
+                'bricks_not_active',
+                'Bricks Builder doit être actif pour lire les schemas des éléments.',
+                ['status' => 503]
+            );
+        }
+
+        $element = sanitize_key((string) $request->get_param('element'));
+        $catalog_only = $this->parse_bool_param($request->get_param('catalogOnly'), empty($element));
+        $include_inherited = $this->parse_bool_param($request->get_param('includeInherited'), true);
+        $include_raw = $this->parse_bool_param($request->get_param('raw'), false);
+
+        $registry = $this->get_bricks_elements_registry();
+        if (empty($registry)) {
+            return new WP_Error(
+                'empty_element_registry',
+                'Impossible de lire le registre Bricks\\Elements::$elements.',
+                ['status' => 500]
+            );
+        }
+
+        $schemas = [];
+        foreach ($registry as $element_name => $entry) {
+            $element_name = (string) $element_name;
+            $object = $this->get_bricks_element_object($element_name, $entry);
+            if (!$object) {
+                continue;
+            }
+
+            $schema = $this->build_bricks_element_schema($element_name, $object, $include_raw);
+            if ($schema) {
+                $schemas[$element_name] = $schema;
+            }
+        }
+
+        ksort($schemas);
+
+        if ($catalog_only || empty($element)) {
+            $catalog = [];
+            foreach ($schemas as $name => $schema) {
+                $catalog[] = [
+                    'name' => $name,
+                    'label' => $schema['label'],
+                    'category' => $schema['category'],
+                    'controlCount' => $schema['controlCount'],
+                    'nestable' => $schema['nestable'],
+                ];
+            }
+
+            return [
+                'success' => true,
+                'mode' => 'catalog',
+                'source' => 'Bricks runtime registry',
+                'bricks_version' => defined('BRICKS_VERSION') ? BRICKS_VERSION : null,
+                'total_elements' => count($catalog),
+                'catalog' => $catalog,
+                'usage' => [
+                    'schema_for_one_element' => ['element' => 'button'],
+                    'with_common_style_controls' => ['element' => 'button', 'includeInherited' => true],
+                ],
+            ];
+        }
+
+        if (!isset($schemas[$element])) {
+            return new WP_Error(
+                'element_schema_not_found',
+                sprintf('Element "%s" introuvable dans le registre Bricks.', $element),
+                [
+                    'status' => 404,
+                    'element' => $element,
+                    'suggestions' => $this->find_similar_strings($element, array_keys($schemas)),
+                ]
+            );
+        }
+
+        $schema = $schemas[$element];
+        if ($include_inherited) {
+            $schema['inheritedControls'] = $this->get_inherited_bricks_style_controls();
+        }
+
+        return [
+            'success' => true,
+            'mode' => 'element',
+            'source' => 'Bricks runtime registry',
+            'bricks_version' => defined('BRICKS_VERSION') ? BRICKS_VERSION : null,
+            'schema' => $schema,
+            'notes' => [
+                'controls_source' => 'Contrôles renvoyés par get_controls() sur la classe runtime Bricks.',
+                'format_warning' => 'Le type de contrôle Bricks indique la clé et l’intention. Pour les formats sensibles, valider avec verify_element après écriture.',
+            ],
+        ];
+    }
+
+    private function parse_bool_param($value, $default = false) {
+        if ($value === null) {
+            return $default;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        $parsed = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        return $parsed === null ? $default : $parsed;
+    }
+
+    private function get_bricks_elements_registry() {
+        if (!class_exists('\Bricks\Elements')) {
+            return [];
+        }
+
+        try {
+            if (isset(\Bricks\Elements::$elements) && is_array(\Bricks\Elements::$elements)) {
+                return \Bricks\Elements::$elements;
+            }
+        } catch (Throwable $e) {
+            // Fallback ci-dessous si Bricks change la visibilité de la propriété.
+        }
+
+        try {
+            if (method_exists('\Bricks\Elements', 'get_elements')) {
+                $elements = \Bricks\Elements::get_elements();
+                return is_array($elements) ? $elements : [];
+            }
+        } catch (Throwable $e) {
+            return [];
+        }
+
+        return [];
+    }
+
+    private function get_bricks_element_object($element_name, $entry) {
+        if (is_object($entry)) {
+            return $entry;
+        }
+
+        $class = null;
+        if (is_string($entry)) {
+            $class = $entry;
+        } elseif (is_array($entry)) {
+            if (isset($entry['instance']) && is_object($entry['instance'])) {
+                return $entry['instance'];
+            }
+            $class = $entry['class'] ?? $entry['element_class'] ?? null;
+        }
+
+        if (!is_string($class) || !class_exists($class)) {
+            return null;
+        }
+
+        try {
+            return new $class(['name' => $element_name]);
+        } catch (Throwable $e) {
+            try {
+                return new $class([]);
+            } catch (Throwable $e2) {
+                try {
+                    return new $class();
+                } catch (Throwable $e3) {
+                    return null;
+                }
+            }
+        }
+    }
+
+    private function build_bricks_element_schema($element_name, $object, $include_raw = false) {
+        $controls = $this->get_bricks_element_controls($object);
+        $compact_controls = [];
+        $settings_properties = [];
+
+        foreach ($controls as $key => $control) {
+            if (!is_array($control)) {
+                continue;
+            }
+
+            $type = isset($control['type']) ? (string) $control['type'] : '';
+            if (in_array($type, ['group', 'section', 'tab', 'separator', 'data'], true)) {
+                continue;
+            }
+
+            $compact_controls[] = $this->compact_bricks_control((string) $key, $control, $include_raw);
+            $settings_properties[(string) $key] = $this->control_to_json_schema($control, (string) $key);
+        }
+
+        return [
+            'name' => $element_name,
+            'label' => $this->get_bricks_element_label($object, $element_name),
+            'category' => $this->get_bricks_element_category($object),
+            'nestable' => $this->is_bricks_element_nestable($object),
+            'controlCount' => count($compact_controls),
+            'controls' => $compact_controls,
+            'settingsSchema' => [
+                'type' => 'object',
+                'additionalProperties' => true,
+                'properties' => empty($settings_properties) ? new stdClass() : $settings_properties,
+            ],
+            'minimalElement' => [
+                'id' => 'example_id',
+                'name' => $element_name,
+                'parent' => 'parent_id',
+                'children' => [],
+                'settings' => new stdClass(),
+            ],
+        ];
+    }
+
+    private function get_bricks_element_controls($object) {
+        try {
+            if (method_exists($object, 'get_controls')) {
+                $controls = $object->get_controls();
+                return is_array($controls) ? $controls : [];
+            }
+        } catch (Throwable $e) {
+            return [];
+        }
+
+        if (isset($object->controls) && is_array($object->controls)) {
+            return $object->controls;
+        }
+
+        return [];
+    }
+
+    private function compact_bricks_control($key, $control, $include_raw = false) {
+        $type = isset($control['type']) ? (string) $control['type'] : 'mixed';
+        $out = [
+            'key' => $key,
+            'type' => $type,
+            'label' => isset($control['label']) ? wp_strip_all_tags((string) $control['label']) : null,
+            'group' => isset($control['group']) ? (string) $control['group'] : null,
+            'tab' => isset($control['tab']) ? (string) $control['tab'] : null,
+            'default' => array_key_exists('default', $control) ? $this->sanitize_schema_value($control['default']) : null,
+            'required' => !empty($control['required']),
+            'valueFormat' => $this->control_value_format($type),
+        ];
+
+        if (!empty($control['options']) && is_array($control['options'])) {
+            $out['options'] = $this->compact_control_options($control['options']);
+        }
+
+        if (!empty($control['fields']) && is_array($control['fields'])) {
+            $fields = [];
+            foreach ($control['fields'] as $field_key => $field) {
+                if (is_array($field)) {
+                    $fields[] = $this->compact_bricks_control((string) $field_key, $field, false);
+                }
+            }
+            $out['fields'] = $fields;
+        }
+
+        if (!empty($control['css'])) {
+            $out['css'] = $this->sanitize_schema_value($control['css'], 0, 4);
+        }
+
+        if ($include_raw) {
+            $out['raw'] = $this->sanitize_schema_value($control, 0, 5);
+        }
+
+        return array_filter($out, function ($value) {
+            return $value !== null && $value !== [];
+        });
+    }
+
+    private function compact_control_options($options) {
+        $compact = [];
+        $count = 0;
+        foreach ($options as $value => $label) {
+            if ($count >= 120) {
+                $compact[] = ['truncated' => true, 'remaining' => count($options) - $count];
+                break;
+            }
+
+            if (is_array($label)) {
+                $compact[] = [
+                    'value' => (string) $value,
+                    'label' => isset($label['label']) ? wp_strip_all_tags((string) $label['label']) : (isset($label['name']) ? wp_strip_all_tags((string) $label['name']) : (string) $value),
+                ];
+            } elseif (is_scalar($label)) {
+                $compact[] = [
+                    'value' => (string) $value,
+                    'label' => wp_strip_all_tags((string) $label),
+                ];
+            }
+            $count++;
+        }
+        return $compact;
+    }
+
+    private function sanitize_schema_value($value, $depth = 0, $max_depth = 5) {
+        if ($depth > $max_depth) {
+            return '[truncated]';
+        }
+        if ($value === null || is_scalar($value)) {
+            return $value;
+        }
+        if (is_array($value)) {
+            $out = [];
+            foreach ($value as $key => $item) {
+                if (is_object($item) && $item instanceof Closure) {
+                    continue;
+                }
+                $out[$key] = $this->sanitize_schema_value($item, $depth + 1, $max_depth);
+            }
+            return $out;
+        }
+        if (is_object($value)) {
+            if ($value instanceof Closure) {
+                return null;
+            }
+            if (method_exists($value, '__toString')) {
+                return (string) $value;
+            }
+            return '[' . get_class($value) . ']';
+        }
+        return null;
+    }
+
+    private function control_to_json_schema($control, $key = '') {
+        $type = isset($control['type']) ? (string) $control['type'] : 'mixed';
+        $schema = [
+            'description' => isset($control['label']) ? wp_strip_all_tags((string) $control['label']) : $key,
+            'controlType' => $type,
+            'valueFormat' => $this->control_value_format($type),
+        ];
+
+        switch ($type) {
+            case 'checkbox':
+            case 'toggle':
+                $schema['type'] = 'boolean';
+                break;
+            case 'number':
+                $schema['type'] = ['string', 'number'];
+                break;
+            case 'select':
+                $schema['type'] = 'string';
+                if (!empty($control['options']) && is_array($control['options'])) {
+                    $schema['enum'] = array_map('strval', array_keys($control['options']));
+                }
+                break;
+            case 'repeater':
+            case 'gallery':
+                $schema['type'] = 'array';
+                break;
+            case 'color':
+            case 'typography':
+            case 'background':
+            case 'border':
+            case 'box-shadow':
+            case 'dimensions':
+            case 'image':
+            case 'link':
+            case 'icon':
+                $schema['type'] = 'object';
+                break;
+            default:
+                $schema['type'] = ['string', 'number', 'boolean', 'object', 'array'];
+                break;
+        }
+
+        return $schema;
+    }
+
+    private function control_value_format($type) {
+        switch ($type) {
+            case 'color':
+                return 'object: {"raw":"#111827"} ou {"raw":"var(--bricks-color-id)","id":"id"}';
+            case 'dimensions':
+                return 'object: {top,right,bottom,left} avec valeurs string, px sans unité si possible';
+            case 'typography':
+                return 'object Bricks typography; line-height en string';
+            case 'background':
+                return 'object Bricks background; color via {"raw":"..."}';
+            case 'border':
+                return 'object Bricks border; radius sous radius.{top,right,bottom,left}';
+            case 'box-shadow':
+                return 'object: {values:{offsetX,offsetY,blur,spread}, color:{raw}}';
+            case 'image':
+                return 'object media: {id,url,size}';
+            case 'gallery':
+                return 'array de medias: [{id,url,size}]';
+            case 'link':
+                return 'object lien: {type,url,newTab,nofollow}';
+            case 'icon':
+                return 'object icone: {library,icon,svg}';
+            case 'repeater':
+                return 'array d’objets selon fields';
+            case 'checkbox':
+            case 'toggle':
+                return 'boolean';
+            case 'select':
+            case 'text':
+            case 'textarea':
+            case 'editor':
+            case 'code':
+                return 'string';
+            case 'number':
+                return 'string ou number; préférer string pour valeurs CSS';
+            default:
+                return 'format selon contrôle Bricks runtime';
+        }
+    }
+
+    private function get_bricks_element_label($object, $fallback) {
+        try {
+            if (method_exists($object, 'get_label')) {
+                $label = $object->get_label();
+                if (is_string($label) && $label !== '') {
+                    return wp_strip_all_tags($label);
+                }
+            }
+        } catch (Throwable $e) {
+            // Fallback ci-dessous.
+        }
+
+        if (isset($object->label) && is_string($object->label) && $object->label !== '') {
+            return wp_strip_all_tags($object->label);
+        }
+
+        return $fallback;
+    }
+
+    private function get_bricks_element_category($object) {
+        if (isset($object->category) && is_string($object->category) && $object->category !== '') {
+            return $object->category;
+        }
+        try {
+            if (method_exists($object, 'get_category')) {
+                $category = $object->get_category();
+                if (is_string($category) && $category !== '') {
+                    return $category;
+                }
+            }
+        } catch (Throwable $e) {
+            // Fallback ci-dessous.
+        }
+        return 'general';
+    }
+
+    private function is_bricks_element_nestable($object) {
+        if (isset($object->nestable)) {
+            return (bool) $object->nestable;
+        }
+        if (isset($object->is_nestable)) {
+            return (bool) $object->is_nestable;
+        }
+        try {
+            if (method_exists($object, 'is_nestable')) {
+                return (bool) $object->is_nestable();
+            }
+        } catch (Throwable $e) {
+            return false;
+        }
+        return false;
+    }
+
+    private function find_similar_strings($needle, $haystack) {
+        $scores = [];
+        foreach ($haystack as $candidate) {
+            similar_text((string) $needle, (string) $candidate, $percent);
+            if ($percent >= 35) {
+                $scores[(string) $candidate] = $percent;
+            }
+        }
+        arsort($scores);
+        return array_slice(array_keys($scores), 0, 8);
+    }
+
+    private function get_inherited_bricks_style_controls() {
+        return [
+            'source' => 'common Bricks style controls, compact MCP reference',
+            'responsiveSyntax' => '{key}:{breakpoint} ex: _padding:mobile_portrait',
+            'stateSyntax' => '{key}:{state} ex: _background:hover',
+            'controls' => [
+                ['key' => '_display', 'format' => 'string', 'examples' => ['block', 'flex', 'grid', 'none']],
+                ['key' => '_direction', 'format' => 'string', 'note' => 'flex-direction fiable sur section/container/block/div'],
+                ['key' => '_flexDirection', 'format' => 'string', 'note' => 'contrôle hérité; ne remplace pas toujours _direction sur layout elements'],
+                ['key' => '_flexWrap', 'format' => 'string'],
+                ['key' => '_alignItems', 'format' => 'string'],
+                ['key' => '_justifyContent', 'format' => 'string'],
+                ['key' => '_columnGap', 'format' => 'string px sans unité'],
+                ['key' => '_rowGap', 'format' => 'string px sans unité'],
+                ['key' => '_gridTemplateColumns', 'format' => 'string CSS', 'note' => 'validé Bricks 2.3.2'],
+                ['key' => '_gridTemplateRows', 'format' => 'string CSS'],
+                ['key' => '_gridGap', 'format' => 'string px sans unité'],
+                ['key' => '_margin', 'format' => '{top,right,bottom,left} strings'],
+                ['key' => '_padding', 'format' => '{top,right,bottom,left} strings'],
+                ['key' => '_width', 'format' => 'string'],
+                ['key' => '_widthMin', 'format' => 'string'],
+                ['key' => '_widthMax', 'format' => 'string'],
+                ['key' => '_height', 'format' => 'string'],
+                ['key' => '_heightMin', 'format' => 'string'],
+                ['key' => '_heightMax', 'format' => 'string'],
+                ['key' => '_aspectRatio', 'format' => 'string CSS'],
+                ['key' => '_typography', 'format' => 'object; color via {raw}; line-height string'],
+                ['key' => '_background', 'format' => 'object; color via {raw}'],
+                ['key' => '_border', 'format' => 'object; radius sous radius.{top,right,bottom,left}'],
+                ['key' => '_boxShadow', 'format' => '{values:{offsetX,offsetY,blur,spread}, color:{raw}}'],
+                ['key' => '_cssFilters', 'format' => 'object; brightness/contrast en strings unitless ex "120"'],
+                ['key' => '_transform', 'format' => 'object; translate/rotate/scale'],
+                ['key' => '_position', 'format' => 'string'],
+                ['key' => '_top/_right/_bottom/_left', 'format' => 'string'],
+                ['key' => '_zIndex', 'format' => 'string ou number'],
+                ['key' => '_cssClasses', 'format' => 'string classes séparées par espaces'],
+            ],
         ];
     }
 

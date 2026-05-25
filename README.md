@@ -34,7 +34,7 @@ C'est la méthode **complète et la plus simple**. Tu obtiens : les outils MCP *
 
 C'est fini. Aucun terminal, aucun JSON à éditer.
 
-### (Optionnel mais recommandé) Activer `verify_element`
+### (Optionnel mais recommandé) Activer les screenshots MCP
 
 Dans un terminal, une seule fois :
 
@@ -42,7 +42,7 @@ Dans un terminal, une seule fois :
 npx playwright install chromium
 ```
 
-Ça télécharge Chromium (~130 Mo) pour que Claude puisse prendre des screenshots de tes pages et vérifier le rendu visuellement.
+Ça télécharge Chromium (~130 Mo) pour que Claude/Codex puisse prendre des screenshots de tes pages avec `verify_element`, `audit_page` et `audit_design_page`.
 
 ### Test final
 
@@ -124,6 +124,12 @@ Claude Code détectera automatiquement le skill au prochain démarrage.
   - Multi-viewport en 1 call (par défaut `["desktop", "mobile_portrait"]`)
   - Idéal pour : état initial avant refonte, démo client, audit après une grosse vague de modifs
   - Checks intégrés : containers vides, images cassées + alt manquants, text-align mixé, débordement horizontal global de la page
+
+**⭐ Audit design IA (v3.12+)**
+- `audit_design_page` — dossier de revue visuelle pour l'IA : fullpage screenshots, crops de sections, contexte DOM/design et brief de critique.
+  - Objectif : détecter les défauts d'harmonie que les checks techniques ne voient pas
+  - Analyse attendue : hiérarchie, rythme, alignements, densité, largeur, typo, CTA, cohérence entre sections, sensation premium, responsive
+  - Ne remplace pas `audit_page` : workflow recommandé = `audit_page` pour les bugs techniques, puis `audit_design_page` pour la critique webdesign générale
 
 **⭐ Upload optimisé (v3.8+)**
 - `upload_local_file`, `upload_local_files_batch` — l'IA donne juste le path local, le MCP server lit le fichier, conversion WebP automatique (-80 à -95% de poids), renommage SEO via le `title`
