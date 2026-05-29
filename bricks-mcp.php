@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude et Codex. Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork et l'installeur Codex, avec skill bricks-builder embarqué.
- * Version: 4.3.0
+ * Version: 4.3.1
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '4.3.0');
+define('BRICKS_MCP_VERSION', '4.3.1');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -3428,9 +3428,12 @@ class BricksMCPServer {
             $env_vars['INSECURE_SSL'] = 'true';
         }
 
+        $current_skill_version = $this->_read_skill_version();
+        $codex_plugin_version = $current_skill_version ?: BRICKS_MCP_VERSION;
+
         $plugin_manifest = wp_json_encode([
             'name'        => $plugin_name,
-            'version'     => '1.0.0',
+            'version'     => $codex_plugin_version,
             'description' => sprintf('Connecte Codex au site %s pour piloter Bricks Builder.', $label),
             'author'      => [
                 'name' => 'Bricks Builder MCP',
@@ -3465,6 +3468,10 @@ class BricksMCPServer {
             $mcp_json,
             $archive_url
         );
+
+        if ($current_skill_version) {
+            update_option('bricks_mcp_last_downloaded_skill_version', $current_skill_version, false);
+        }
 
         if (ob_get_length()) {
             ob_end_clean();
@@ -3560,12 +3567,8 @@ class BricksMCPServer {
             . "    fh.write('\\n')\n"
             . "PY\n\n"
             . "if command -v codex >/dev/null 2>&1; then\n"
-            . "  echo \"Activation du plugin dans Codex...\"\n"
-            . "  if codex plugin list 2>/dev/null | grep -q \"\$PLUGIN_NAME@personal (installed\"; then\n"
-            . "    echo \"Plugin déjà installé dans Codex.\"\n"
-            . "  else\n"
-            . "    codex plugin add \"\$PLUGIN_NAME@personal\"\n"
-            . "  fi\n"
+            . "  echo \"Activation/rafraîchissement du plugin dans Codex...\"\n"
+            . "  codex plugin add \"\$PLUGIN_NAME@personal\"\n"
             . "else\n"
             . "  echo \"CLI Codex introuvable. Lance manuellement : codex plugin add \$PLUGIN_NAME@personal\"\n"
             . "fi\n\n"
@@ -4357,24 +4360,26 @@ class BricksMCPServer {
         $current = $this->_read_skill_version();
         $last_downloaded = get_option('bricks_mcp_last_downloaded_skill_version', null);
 
+        $local_version = $request->get_param('localVersion');
         $is_outdated = false;
         $update_message = null;
-        if ($current && $last_downloaded && version_compare($last_downloaded, $current, '<')) {
+
+        // Si l'IA fournit sa version locale, c'est la source la plus fiable.
+        // lastDownloadedSkillVersion n'est qu'un indicateur admin côté WP.
+        if ($local_version && $current) {
+            if (version_compare($local_version, $current, '<')) {
+                $is_outdated = true;
+                $update_message = sprintf(
+                    "Ton skill local est en v%s, la version actuelle côté serveur est v%s. Demande à l'utilisateur de re-télécharger le .plugin depuis WP admin → Bricks MCP.",
+                    $local_version,
+                    $current
+                );
+            }
+        } elseif ($current && $last_downloaded && version_compare($last_downloaded, $current, '<')) {
             $is_outdated = true;
             $update_message = sprintf(
                 "Une mise à jour skill est disponible (v%s → v%s). Re-télécharge le .plugin depuis WP admin → Bricks MCP.",
                 $last_downloaded,
-                $current
-            );
-        }
-
-        // Permet aussi à l'AI de comparer sa version locale (passée en query)
-        $local_version = $request->get_param('localVersion');
-        if ($local_version && $current && version_compare($local_version, $current, '<')) {
-            $is_outdated = true;
-            $update_message = sprintf(
-                "Ton skill local est en v%s, la version actuelle côté serveur est v%s. Demande à l'utilisateur de re-télécharger le .plugin depuis WP admin → Bricks MCP.",
-                $local_version,
                 $current
             );
         }
