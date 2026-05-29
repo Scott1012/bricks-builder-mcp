@@ -14,7 +14,7 @@ But : savoir quelle surface native Bricks utiliser avant d'écrire du CSS/JS cus
 | Defaults globaux | theme styles | `list_theme_styles`, `create_theme_style`, `update_theme_style` |
 | Fonts | Font Manager / header link | `list_custom_fonts`, `register_custom_font`, `register_google_font_locally`, `set_custom_code` |
 | CSS global | custom code global | `get_custom_code`, `set_custom_code` |
-| CSS page | custom code page | `get_page_custom_code`, `set_page_custom_code` |
+| CSS/JS page | custom code page | `get_page_custom_code`, `set_page_custom_code` |
 | Images/assets | media library | `upload_local_file`, `list_media` |
 | Contenu dynamique | WordPress posts/CPT/taxonomies/meta | `list_post_types`, `create_post`, `update_post`, `list_posts` |
 
@@ -104,6 +104,20 @@ Utiliser `set_page_custom_code` pour :
 - animation ou override local ;
 - CSS temporaire pendant migration ;
 - pseudo-classes/états non exposés par les settings Bricks.
+
+Formats page Bricks 2.3 :
+
+```js
+set_page_custom_code({
+  pageId,
+  customCss: ".scope { ... }",
+  customScriptsHeader: "<script>/* head */</script>",
+  customScriptsBodyHeader: "<script>/* after body */</script>",
+  customScriptsBodyFooter: "<script>/* before body close */</script>"
+})
+```
+
+`customScripts` est seulement un alias MCP legacy vers `customScriptsBodyFooter`.
 
 Éviter d'y mettre le layout principal si Bricks peut le faire nativement.
 

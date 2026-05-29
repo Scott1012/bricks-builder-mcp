@@ -570,7 +570,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
       
       {
         name: "update_element",
-        description: "Modifie UN SEUL élément sans recharger/renvoyer toute la page. Ultra économe en tokens. Utilise pour changer une couleur, un texte, etc. Permet aussi de renommer l'élément dans la structure Bricks via le paramètre `label`.",
+        description: "Modifie UN SEUL élément sans recharger/renvoyer toute la page. Ultra économe en tokens. Utilise pour changer une couleur, un texte, etc. Permet aussi de renommer l'élément dans la structure Bricks via le paramètre `label`. Refuse les changements de code exécutable sur les éléments `code`, car Bricks exige une signature manuelle valide.",
         inputSchema: {
           type: "object",
           properties: {
@@ -597,7 +597,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
       
       {
         name: "add_element",
-        description: "Ajoute UN SEUL nouvel élément à la page. Utilise pour ajouter un bouton, un paragraphe, etc.",
+        description: "Ajoute UN SEUL nouvel élément à la page. Utilise pour ajouter un bouton, un paragraphe, etc. Si `element.parent` pointe vers un élément existant, le parent.children est synchronisé automatiquement.",
         inputSchema: {
           type: "object",
           properties: {
@@ -620,7 +620,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
       
       {
         name: "batch_add",
-        description: "Ajoute PLUSIEURS éléments en UNE SEULE fois. Utilise pour créer une section complète (5-10 éléments). Plus efficace que add_element en boucle.",
+        description: "Ajoute PLUSIEURS éléments en UNE SEULE fois. Utilise pour créer une section complète (5-10 éléments). Synchronise automatiquement les parent.children des éléments ajoutés. Plus efficace que add_element en boucle.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1066,13 +1066,16 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "set_page_custom_code",
-        description: "Définit du CSS et/ou JS spécifique à une page (Page Settings → Custom Code). Utile pour des animations, des polices spécifiques à cette page seulement, etc.",
+        description: "Définit du CSS et/ou JS spécifique à une page (Page Settings → Custom Code). Utiliser les emplacements Bricks natifs : customScriptsHeader, customScriptsBodyHeader, customScriptsBodyFooter. `customScripts` reste un alias legacy vers body footer.",
         inputSchema: {
           type: "object",
           properties: {
-            pageId:        { type: "number", description: "ID de la page" },
-            customCss:     { type: "string", description: "CSS de la page (sera injecté dans <head> uniquement sur cette page)" },
-            customScripts: { type: "string", description: "Scripts/HTML de la page (injectés dans <head>)" },
+            pageId:                  { type: "number", description: "ID de la page" },
+            customCss:               { type: "string", description: "CSS de la page (injecté uniquement sur cette page)" },
+            customScriptsHeader:     { type: "string", description: "HTML/scripts injectés dans <head> uniquement sur cette page" },
+            customScriptsBodyHeader: { type: "string", description: "HTML/scripts injectés juste après <body> uniquement sur cette page" },
+            customScriptsBodyFooter: { type: "string", description: "HTML/scripts injectés avant </body> uniquement sur cette page" },
+            customScripts:           { type: "string", description: "Alias legacy : écrit dans customScriptsBodyFooter" },
           },
           required: ["pageId"],
         },
@@ -1848,6 +1851,9 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await callWordPressAPI("/set-page-custom-code", "POST", {
           pageId: args.pageId,
           customCss: args.customCss,
+          customScriptsHeader: args.customScriptsHeader,
+          customScriptsBodyHeader: args.customScriptsBodyHeader,
+          customScriptsBodyFooter: args.customScriptsBodyFooter,
           customScripts: args.customScripts,
         });
         break;

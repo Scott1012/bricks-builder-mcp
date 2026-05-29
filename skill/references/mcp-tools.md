@@ -40,8 +40,8 @@ list_components()
 | détail d'un élément | `get_element` | avant patch complexe |
 | schema d'un élément | `get_element_schema` | avant d'inventer un format |
 | modifier settings | `update_element` | merge récursif, ne déplace pas |
-| ajouter un élément | `add_element` | petit ajout isolé |
-| ajouter une section | `batch_add` | 5-10 éléments max puis vérifier |
+| ajouter un élément | `add_element` | synchronise `parent.children` si `parent` existe |
+| ajouter une section | `batch_add` | synchronise `parent.children`, 5-10 éléments max puis vérifier |
 | supprimer un élément | `delete_element` | nettoie parent/children |
 | réordonner sections | `reorder_sections` | sections top-level |
 | modifier parent/children | `get_page_json` + `update_page_json` | nécessaire pour reparent |
@@ -76,7 +76,9 @@ Ordre recommandé : palette/variables -> theme styles -> global classes -> setti
 | fonts Bricks | `list_custom_fonts`, `register_custom_font`, `delete_custom_font` | Font Manager |
 | Google Font locale | `register_google_font_locally` | peut ne pas suffire au frontend |
 | charger Google Font frontend | `set_custom_code({customScriptsHeader})` | méthode fiable |
-| code elements Bricks | `get_code_execution_status`, `set_code_execution` | Bricks exige aussi les signatures |
+| code elements Bricks | `get_code_execution_status`, `set_code_execution` | éviter pour CSS/JS MCP : signature manuelle requise |
+
+Pour le JS spécifique page, utiliser `set_page_custom_code({customScriptsBodyFooter})`. `customScripts` existe seulement comme alias legacy vers body footer.
 
 ## Menus Et Contenu
 

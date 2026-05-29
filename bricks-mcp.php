@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude et Codex. Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork et l'installeur Codex, avec skill bricks-builder embarqué.
- * Version: 4.3.1
+ * Version: 4.3.2
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '4.3.1');
+define('BRICKS_MCP_VERSION', '4.3.2');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -647,6 +647,21 @@ class BricksMCPServer {
 
         foreach ($json_data as &$element) {
             if (($element['id'] ?? '') === $element_id) {
+                $will_execute_code = is_array($new_settings) && array_key_exists('executeCode', $new_settings)
+                    ? (bool) $new_settings['executeCode']
+                    : !empty($element['settings']['executeCode']);
+                if (
+                    ($element['name'] ?? '') === 'code'
+                    && is_array($new_settings)
+                    && $this->settings_contain_any_key($new_settings, ['code', 'cssCode', 'javascriptCode'])
+                    && $will_execute_code
+                ) {
+                    return new WP_Error(
+                        'code_signature_required',
+                        'Modification refusée : changer le code d’un élément Bricks "code" exécutable invalide sa signature. Utilise plutôt set_page_custom_code pour CSS/JS de page, ou signe manuellement le Code element dans Bricks après modification.',
+                        ['status' => 409]
+                    );
+                }
                 // Fusionner les settings de manière récursive PROFONDE
                 if (!empty($new_settings)) {
                     if (!isset($element['settings'])) {
@@ -707,6 +722,8 @@ class BricksMCPServer {
             $json_data[] = $element;
         }
 
+        $synced_parents = $this->sync_parent_child_links_for_elements($json_data, [$element['id'] ?? null]);
+
         // Sauvegarder
         delete_post_meta($page_id, '_bricks_page_content_2');
         add_post_meta($page_id, '_bricks_page_content_2', $json_data, true);
@@ -716,6 +733,7 @@ class BricksMCPServer {
             'success' => true,
             'message' => 'Élément ajouté',
             'elementId' => $element['id'] ?? null,
+            'parentsSynced' => $synced_parents,
             'pageId' => $page_id,
             'url' => get_permalink($page_id)
         ]);
@@ -739,9 +757,15 @@ class BricksMCPServer {
         }
 
         // Ajouter tous les éléments
+        $added_ids = [];
         foreach ($elements as $element) {
             $json_data[] = $element;
+            if (!empty($element['id'])) {
+                $added_ids[] = $element['id'];
+            }
         }
+
+        $synced_parents = $this->sync_parent_child_links_for_elements($json_data, $added_ids);
 
         // Sauvegarder
         delete_post_meta($page_id, '_bricks_page_content_2');
@@ -752,6 +776,7 @@ class BricksMCPServer {
             'success' => true,
             'message' => count($elements) . ' éléments ajoutés',
             'elementsAdded' => count($elements),
+            'parentsSynced' => $synced_parents,
             'pageId' => $page_id,
             'url' => get_permalink($page_id)
         ]);
@@ -929,6 +954,85 @@ class BricksMCPServer {
         }
 
         return $merged;
+    }
+
+    private function settings_contain_any_key($settings, $keys) {
+        if (!is_array($settings)) {
+            return false;
+        }
+
+        foreach ($settings as $key => $value) {
+            if (in_array((string) $key, $keys, true)) {
+                return true;
+            }
+            if (is_array($value) && $this->settings_contain_any_key($value, $keys)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function sync_parent_child_links_for_elements(&$json_data, $target_ids) {
+        if (!is_array($json_data) || empty($target_ids)) {
+            return [];
+        }
+
+        $target_ids = array_values(array_unique(array_filter(array_map('strval', $target_ids))));
+        if (empty($target_ids)) {
+            return [];
+        }
+
+        $index_by_id = [];
+        foreach ($json_data as $index => $element) {
+            if (!empty($element['id'])) {
+                $index_by_id[(string) $element['id']] = $index;
+            }
+        }
+
+        $target_ids = array_values(array_filter($target_ids, function($id) use ($index_by_id) {
+            return isset($index_by_id[$id]);
+        }));
+        if (empty($target_ids)) {
+            return [];
+        }
+
+        // Un enfant ne doit être référencé que par son parent effectif.
+        foreach ($json_data as &$element) {
+            if (!empty($element['children']) && is_array($element['children'])) {
+                $children = array_filter($element['children'], function($child_id) use ($target_ids) {
+                    return !in_array((string) $child_id, $target_ids, true);
+                });
+                $element['children'] = array_values(array_unique(array_map('strval', $children)));
+            }
+        }
+        unset($element);
+
+        $synced_parent_ids = [];
+        foreach ($target_ids as $child_id) {
+            $child_index = $index_by_id[$child_id];
+            $parent_id = $json_data[$child_index]['parent'] ?? null;
+
+            if ($parent_id === null || $parent_id === '' || (string) $parent_id === '0') {
+                continue;
+            }
+
+            $parent_key = (string) $parent_id;
+            if (!isset($index_by_id[$parent_key])) {
+                continue;
+            }
+
+            $parent_index = $index_by_id[$parent_key];
+            if (empty($json_data[$parent_index]['children']) || !is_array($json_data[$parent_index]['children'])) {
+                $json_data[$parent_index]['children'] = [];
+            }
+
+            $json_data[$parent_index]['children'][] = $child_id;
+            $json_data[$parent_index]['children'] = array_values(array_unique(array_map('strval', $json_data[$parent_index]['children'])));
+            $synced_parent_ids[] = $parent_key;
+        }
+
+        return array_values(array_unique($synced_parent_ids));
     }
 
     /**
@@ -2798,17 +2902,25 @@ class BricksMCPServer {
         }
         $page_settings = get_post_meta($page_id, '_bricks_page_settings', true);
         if (!is_array($page_settings)) $page_settings = [];
+        $legacy_scripts = $page_settings['customScripts'] ?? '';
+        $body_footer_scripts = $page_settings['customScriptsBodyFooter'] ?? '';
         return [
-            'success'              => true,
-            'pageId'               => $page_id,
-            'customCss'            => $page_settings['customCss'] ?? '',
-            'customScripts'        => $page_settings['customScripts'] ?? '',
+            'success'                 => true,
+            'pageId'                  => $page_id,
+            'customCss'               => $page_settings['customCss'] ?? '',
+            // Legacy MCP alias. Bricks 2.3 uses the three location-specific keys below.
+            'customScripts'           => $legacy_scripts !== '' ? $legacy_scripts : $body_footer_scripts,
+            'customScriptsHeader'     => $page_settings['customScriptsHeader'] ?? '',
+            'customScriptsBodyHeader' => $page_settings['customScriptsBodyHeader'] ?? '',
+            'customScriptsBodyFooter' => $body_footer_scripts,
+            'hasLegacyCustomScripts'  => $legacy_scripts !== '',
         ];
     }
 
     /**
      * POST /set-page-custom-code — Définit du CSS/JS spécifique à une page.
-     * Params : pageId (int), customCss (str opt), customScripts (str opt)
+     * Params : pageId (int), customCss, customScriptsHeader, customScriptsBodyHeader,
+     * customScriptsBodyFooter. customScripts reste un alias legacy vers body footer.
      */
     public function api_set_page_custom_code($request) {
         $page_id = (int) $request->get_param('pageId');
@@ -2825,18 +2937,36 @@ class BricksMCPServer {
 
         $changed = [];
         $css = $request->get_param('customCss');
-        $js  = $request->get_param('customScripts');
-        if ($css !== null) { $page_settings['customCss'] = (string) $css; $changed[] = 'customCss'; }
-        if ($js  !== null) { $page_settings['customScripts'] = (string) $js;  $changed[] = 'customScripts'; }
+        if ($css !== null) {
+            $page_settings['customCss'] = (string) $css;
+            $changed[] = 'customCss';
+        }
+
+        $legacy_js = $request->get_param('customScripts');
+        if ($legacy_js !== null) {
+            $page_settings['customScriptsBodyFooter'] = (string) $legacy_js;
+            unset($page_settings['customScripts']);
+            $changed[] = 'customScriptsBodyFooter';
+            $changed[] = 'customScriptsLegacyAlias';
+        }
+
+        foreach (['customScriptsHeader', 'customScriptsBodyHeader', 'customScriptsBodyFooter'] as $key) {
+            $value = $request->get_param($key);
+            if ($value !== null) {
+                $page_settings[$key] = (string) $value;
+                $changed[] = $key;
+            }
+        }
 
         if (empty($changed)) {
-            return new WP_Error('no_changes', 'Aucun champ fourni (customCss, customScripts)', ['status' => 400]);
+            return new WP_Error('no_changes', 'Aucun champ fourni (customCss, customScriptsHeader, customScriptsBodyHeader, customScriptsBodyFooter, customScripts legacy)', ['status' => 400]);
         }
 
         delete_post_meta($page_id, '_bricks_page_settings');
         add_post_meta($page_id, '_bricks_page_settings', $page_settings, true);
+        $this->clear_bricks_cache($page_id);
 
-        return ['success' => true, 'pageId' => $page_id, 'updated' => $changed, 'message' => 'Custom code de la page mis à jour'];
+        return ['success' => true, 'pageId' => $page_id, 'updated' => array_values(array_unique($changed)), 'message' => 'Custom code de la page mis à jour'];
     }
 
     // ============================================================
