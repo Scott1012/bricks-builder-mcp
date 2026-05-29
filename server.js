@@ -570,7 +570,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
       
       {
         name: "update_element",
-        description: "Modifie UN SEUL élément sans recharger/renvoyer toute la page. Ultra économe en tokens. Utilise pour changer une couleur, un texte, etc. Permet aussi de renommer l'élément dans la structure Bricks via le paramètre `label`. Refuse les changements de code exécutable sur les éléments `code`, car Bricks exige une signature manuelle valide.",
+        description: "Modifie UN SEUL élément sans recharger/renvoyer toute la page. Ultra économe en tokens. Utilise pour changer une couleur, un texte, etc. Permet aussi de renommer l'élément dans la structure Bricks via le paramètre `label`. Si un élément `code` exécutable est modifié, la réponse indique qu'une signature manuelle Bricks est requise.",
         inputSchema: {
           type: "object",
           properties: {

@@ -76,7 +76,7 @@ Ordre recommandé : palette/variables -> theme styles -> global classes -> setti
 | fonts Bricks | `list_custom_fonts`, `register_custom_font`, `delete_custom_font` | Font Manager |
 | Google Font locale | `register_google_font_locally` | peut ne pas suffire au frontend |
 | charger Google Font frontend | `set_custom_code({customScriptsHeader})` | méthode fiable |
-| code elements Bricks | `get_code_execution_status`, `set_code_execution` | éviter pour CSS/JS MCP : signature manuelle requise |
+| code elements Bricks | `get_code_execution_status`, `set_code_execution` | après modification de code exécutable, prévenir que signature manuelle Bricks est requise |
 
 Pour le JS spécifique page, utiliser `set_page_custom_code({customScriptsBodyFooter})`. `customScripts` existe seulement comme alias legacy vers body footer.
 

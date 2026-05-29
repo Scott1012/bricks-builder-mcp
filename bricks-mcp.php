@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude et Codex. Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork et l'installeur Codex, avec skill bricks-builder embarqué.
- * Version: 4.3.2
+ * Version: 4.3.3
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '4.3.2');
+define('BRICKS_MCP_VERSION', '4.3.3');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -644,6 +644,7 @@ class BricksMCPServer {
         }
 
         $element_found = false;
+        $code_signature_warning = null;
 
         foreach ($json_data as &$element) {
             if (($element['id'] ?? '') === $element_id) {
@@ -656,11 +657,7 @@ class BricksMCPServer {
                     && $this->settings_contain_any_key($new_settings, ['code', 'cssCode', 'javascriptCode'])
                     && $will_execute_code
                 ) {
-                    return new WP_Error(
-                        'code_signature_required',
-                        'Modification refusée : changer le code d’un élément Bricks "code" exécutable invalide sa signature. Utilise plutôt set_page_custom_code pour CSS/JS de page, ou signe manuellement le Code element dans Bricks après modification.',
-                        ['status' => 409]
-                    );
+                    $code_signature_warning = 'Attention : le contenu d’un élément Bricks "code" exécutable a été modifié via API. Bricks peut ne pas l’exécuter tant que le Code element n’est pas re-signé manuellement dans le builder / Code Review.';
                 }
                 // Fusionner les settings de manière récursive PROFONDE
                 if (!empty($new_settings)) {
@@ -693,6 +690,8 @@ class BricksMCPServer {
             'message' => 'Élément modifié',
             'elementId' => $element_id,
             'pageId' => $page_id,
+            'warning' => $code_signature_warning,
+            'requiresManualCodeSignature' => $code_signature_warning !== null,
             'url' => get_permalink($page_id)
         ]);
     }
