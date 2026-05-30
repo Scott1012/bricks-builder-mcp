@@ -79,6 +79,12 @@ Points de départ utiles :
 - `filter-search` : au minimum `filterQueryId` ;
 - `filter-range` et `filter-datepicker` : ajouter seulement après avoir validé un cas simple en frontend.
 
+Workflow sûr :
+
+- valider d'abord un payload minimal avec `verify_element()` ;
+- ajouter ensuite les options avancées une par une ;
+- si le filtre disparaît du DOM, revenir au dernier état minimal valide au lieu de repartir d'un payload complet.
+
 ## Image Cover Dans Query Loop
 
 Ne pas faire un cover avec `_position:absolute` sur l'image dynamique d'une Query Loop sans test : les clones peuvent se dimensionner sur toute la section.

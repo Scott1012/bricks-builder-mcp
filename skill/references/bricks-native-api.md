@@ -78,6 +78,20 @@ Ordre recommandé :
 5. Settings locaux pour variations ponctuelles.
 6. Custom CSS seulement pour états/pseudos/effets que Bricks ne pilote pas proprement.
 
+## Natif ou code
+
+Décision par défaut :
+
+- mise en page, sections, ordre des blocs, couleurs, typo, espacements : natif Bricks ;
+- contenu éditorial et CTA simples : natif Bricks ;
+- logique dynamique fragile, filtres complexes, widgets JS, galerie/appel AJAX spécifique : code ;
+- ne basculer en code que si le natif devient instable, trop verbeux, ou demande des contournements CSS/JSON fragiles.
+
+Objectif :
+
+- garder la page éditable dans Bricks pour les retouches courantes ;
+- isoler en code seulement les modules spéciaux.
+
 ## Global classes
 
 Format natif :
@@ -102,6 +116,7 @@ Utiliser `set_custom_code` pour :
 Utiliser `set_page_custom_code` pour :
 
 - animation ou override local ;
+- module HTML/CSS/JS spécifique à une page ;
 - CSS temporaire pendant migration ;
 - pseudo-classes/états non exposés par les settings Bricks.
 
@@ -120,6 +135,43 @@ set_page_custom_code({
 `customScripts` est seulement un alias MCP legacy vers `customScriptsBodyFooter`.
 
 Éviter d'y mettre le layout principal si Bricks peut le faire nativement.
+
+Utiliser un élément `code` Bricks seulement si le fragment HTML doit vivre ensemble dans la structure de page. Sinon, préférer :
+
+- structure visible en éléments Bricks natifs ;
+- CSS/JS module dans `set_page_custom_code` ;
+- données éditables gardées dans les éléments Bricks autour.
+
+## Organisation des modules code
+
+Quand un module doit rester en code :
+
+- 1 module = 1 responsabilité claire ;
+- ajouter un commentaire d'en-tête avec nom, rôle et zone de page ;
+- préfixer HTML/CSS/JS avec un namespace stable, par exemple `jt-filter-*` ;
+- éviter un gros blob mélangeant plusieurs widgets sans repères ;
+- garder les textes éditables dans Bricks si possible, pas hardcodés dans le script ;
+- si le code est page-spécifique, le ranger dans `set_page_custom_code` avec séparateurs de module lisibles.
+
+Exemple de séparateur :
+
+```css
+/* Module: chantiers-filter | Zone: section realisations */
+.jt-filter { }
+```
+
+```js
+/* Module: chantiers-filter | Role: interactions frontend */
+```
+
+## Performance
+
+Règle pratique :
+
+- pour le layout simple, le natif Bricks est généralement meilleur ;
+- pour un module complexe mal supporté par Bricks, un petit module code propre est souvent meilleur qu'une accumulation de wrappers et d'overrides ;
+- éviter le code global inutilement chargé sur tout le site si le besoin est limité à une page ;
+- éviter aussi les gros CSS page monolithiques si Bricks peut porter les styles de base.
 
 ## Composants, slots, templates
 

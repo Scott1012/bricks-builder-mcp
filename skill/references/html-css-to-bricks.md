@@ -178,6 +178,28 @@ Refuser le CSS custom pour :
 
 JS, iframes et ressources externes doivent être traités comme risqués : ne pas les convertir en `code` element sans validation explicite, car Bricks peut exiger activation/signature.
 
+## Quand basculer vers le code
+
+Basculer vers un module code seulement si au moins un de ces points est vrai :
+
+- Bricks ne rend pas le composant de façon fiable en frontend ;
+- le JSON natif devient trop fragile ou trop ambigu ;
+- la logique dépend d'interactions JS ou d'un rendu conditionnel avancé ;
+- reproduire le module en natif impose beaucoup de wrappers, overrides ou hacks.
+
+Ne pas basculer en code pour :
+
+- réorganiser des sections ;
+- éditer des textes ;
+- ajuster des couleurs, espacements, rayons, typo ;
+- corriger un layout simple.
+
+Quand un module part en code, garder si possible autour :
+
+- la section Bricks ;
+- les titres/textes éditables ;
+- les espacements et couleurs principaux.
+
 ## Checklist de conversion
 
 - Chaque section source a une section Bricks claire.

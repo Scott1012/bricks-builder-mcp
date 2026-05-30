@@ -42,6 +42,12 @@ Ne pas copier le HTML brut. Traduire :
 - règles CSS simples -> settings natifs ;
 - pseudos/animations spécifiques -> CSS page/global seulement si nécessaire.
 
+Décision de surface :
+
+- si la modification vise surtout contenu, ordre, couleur, spacing, typo : rester en natif Bricks ;
+- si la modification vise un widget ou une logique fragile : isoler un module code ;
+- ne pas envoyer une section entière en code si seuls 10% du besoin sont réellement dynamiques.
+
 Si une page existe déjà, préférer une modification ciblée à un remplacement complet : chercher les éléments, patcher les settings, vérifier. Remplacer toute la page seulement pour une refonte assumée.
 
 Lire [html-css-to-bricks.md](html-css-to-bricks.md) avant de créer la structure.
@@ -74,6 +80,13 @@ Pour une section :
 - global classes pour patterns répétés ;
 - images avec alt ;
 - aucun container vide sauf décor contrôlé.
+
+Pour un module code :
+
+- garder un wrapper/section Bricks lisible autour ;
+- nommer le module clairement ;
+- vérifier que le code n'absorbe pas des contenus qui devraient rester éditables ;
+- documenter le namespace utilisé.
 
 ## 4. Choisir le bon outil
 
@@ -114,6 +127,13 @@ Corriger immédiatement :
 - container visible vide ;
 - typo ou font non chargée.
 
+Pour un module code, vérifier aussi :
+
+- le module apparaît réellement dans le DOM ;
+- CSS/JS chargé seulement au bon endroit ;
+- les textes attendus restent modifiables sans réécrire tout le script ;
+- pas de régression desktop/mobile.
+
 ## 6. Auditer
 
 Avant validation :
@@ -152,5 +172,6 @@ Avant de dire que c'est fini :
 - aucun critical dans `audit_page` ;
 - findings design traités ou assumés ;
 - CSS custom restant justifié ;
+- chaque module code restant est justifié et isolé ;
 - structure Bricks lisible pour un humain ;
 - couleurs/typos/paddings principaux éditables dans Bricks.
