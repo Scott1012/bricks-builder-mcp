@@ -1,6 +1,6 @@
 ---
 name: bricks-builder
-version: 1.6.0
+version: 1.6.1
 description: Convertir, créer et maintenir des pages WordPress Bricks Builder avec une approche native-first. Utiliser ce skill pour transformer HTML/CSS en structure Bricks éditable, choisir les bons éléments Bricks, appliquer les settings natifs, limiter le CSS custom, gérer responsive/design system, et vérifier le rendu frontend.
 ---
 
