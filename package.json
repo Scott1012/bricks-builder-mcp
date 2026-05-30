@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "bricks-builder-mcp",
-  "version": "3.12.3",
+  "version": "3.12.4",
   "description": "Serveur MCP pour piloter Bricks Builder (WordPress) depuis Claude/Codex — édition de pages, gestion d'éléments, audit technique, audit design visuel, upload optimisé WebP. Communauté Discord : https://discord.gg/rX22zHRzH",
   "homepage": "https://discord.gg/rX22zHRzH",
   "main": "server.js",

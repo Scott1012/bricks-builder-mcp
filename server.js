@@ -854,6 +854,11 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "get_filter_schema",
+        description: "Retourne le schema métier des Query Filters Bricks : état d'activation des query filters, éléments filter-*, clés de liaison (filterQueryId, filterSource, filterTaxonomy, etc.) et workflow recommandé.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
         name: "update_global_styles",
         description: "Met à jour les settings globaux Bricks via fusion récursive. Utile pour appliquer une typo de site ou une convention CSS partout d'un coup. Seuls les champs fournis sont modifiés.",
         inputSchema: {
@@ -1714,6 +1719,11 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
           includeInherited: args.includeInherited,
           raw: args.raw || false,
         });
+        break;
+
+      case "get_filter_schema":
+        console.error(`[LOG] Exécution: get_filter_schema`);
+        result = await callWordPressAPI("/get-filter-schema", "GET");
         break;
 
       case "update_global_styles":

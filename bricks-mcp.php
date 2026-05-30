@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude et Codex. Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork et l'installeur Codex, avec skill bricks-builder embarqué.
- * Version: 4.3.5
+ * Version: 4.3.6
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '4.3.5');
+define('BRICKS_MCP_VERSION', '4.3.6');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -251,6 +251,11 @@ class BricksMCPServer {
         register_rest_route($namespace, '/get-element-schema', [
             'methods' => 'POST',
             'callback' => [$this, 'api_get_element_schema'],
+            'permission_callback' => [$this, 'check_api_key']
+        ]);
+        register_rest_route($namespace, '/get-filter-schema', [
+            'methods' => 'GET',
+            'callback' => [$this, 'api_get_filter_schema'],
             'permission_callback' => [$this, 'check_api_key']
         ]);
         register_rest_route($namespace, '/list-all-pages', [
@@ -1509,6 +1514,110 @@ class BricksMCPServer {
                 'query_filter_warning' => strpos($element, 'filter-') === 0
                     ? 'Les filtres Query doivent être activés dans Bricks > Settings > Query filters et reliés à une Target Query réelle. Si le schema officiel ne montre que les styles, créer un exemple en UI puis inspecter avec get_element avant automatisation.'
                     : null,
+            ],
+        ];
+    }
+
+    public function api_get_filter_schema($request) {
+        if (!class_exists('\Bricks\Elements')) {
+            return new WP_Error(
+                'bricks_not_active',
+                'Bricks Builder doit être actif pour lire le schema des filtres Query.',
+                ['status' => 503]
+            );
+        }
+
+        $filters_enabled = null;
+        $detection_source = 'unavailable';
+
+        if (class_exists('\Bricks\Helpers') && method_exists('\Bricks\Helpers', 'enabled_query_filters')) {
+            try {
+                $filters_enabled = (bool) \Bricks\Helpers::enabled_query_filters();
+                $detection_source = 'Bricks\\Helpers::enabled_query_filters';
+            } catch (Throwable $e) {
+                $filters_enabled = null;
+                $detection_source = 'Bricks\\Helpers::enabled_query_filters (error)';
+            }
+        }
+
+        return [
+            'success' => true,
+            'bricks_version' => defined('BRICKS_VERSION') ? BRICKS_VERSION : null,
+            'filters_enabled' => $filters_enabled,
+            'detection_source' => $detection_source,
+            'enable_filters_hint' => 'Activer Bricks > Settings > Performance > "Enable query sort / filter / live search". Sans cela, les filtres peuvent rendre vide ou ne rien piloter côté frontend.',
+            'schema_type' => 'guide_schema',
+            'notes' => [
+                'Cet outil donne les clés métier utiles pour brancher les filtres Query. Ce n’est pas un schema runtime exhaustif généré par Bricks.',
+                'Pour une version Bricks future ou un cas limite, créer un filtre minimal dans l’UI puis inspecter avec get_element reste la méthode de vérification finale.',
+                'filterQueryId doit cibler l’ID Bricks de l’élément loop (6 caractères), pas un post ID WordPress.',
+            ],
+            'filter_elements' => [
+                'filter-checkbox' => [
+                    'label' => 'Filter - Checkbox',
+                    'supports_source' => ['taxonomy', 'wpField', 'customField'],
+                    'required' => ['filterQueryId', 'filterSource'],
+                ],
+                'filter-radio' => [
+                    'label' => 'Filter - Radio',
+                    'supports_source' => ['taxonomy', 'wpField', 'customField'],
+                    'supports_action' => ['filter', 'sort', 'per_page'],
+                    'required' => ['filterQueryId', 'filterSource'],
+                ],
+                'filter-select' => [
+                    'label' => 'Filter - Select',
+                    'supports_source' => ['taxonomy', 'wpField', 'customField'],
+                    'supports_action' => ['filter', 'sort', 'per_page'],
+                    'required' => ['filterQueryId', 'filterSource'],
+                    'bricks_2_3_notes' => [
+                        'choicesJs' => 'Enhanced select Choices.js.',
+                        'choicesSearch' => 'Recherche dans le dropdown.',
+                        'enableMultiple' => 'Multi-sélection quand le mode le permet.',
+                    ],
+                ],
+                'filter-search' => [
+                    'label' => 'Filter - Search',
+                    'supports_source' => [],
+                    'required' => ['filterQueryId'],
+                ],
+                'filter-range' => [
+                    'label' => 'Filter - Range',
+                    'supports_source' => ['taxonomy', 'wpField', 'customField'],
+                    'required' => ['filterQueryId', 'filterSource'],
+                ],
+                'filter-datepicker' => [
+                    'label' => 'Filter - Datepicker',
+                    'supports_source' => ['wpField', 'customField'],
+                    'required' => ['filterQueryId', 'filterSource'],
+                ],
+                'filter-submit' => [
+                    'label' => 'Filter - Submit / Reset',
+                    'supports_source' => [],
+                    'required' => ['filterQueryId'],
+                    'note' => 'Utile quand filterApplyOn=click sur les autres filtres.',
+                ],
+                'filter-active-filters' => [
+                    'label' => 'Filter - Active Filters',
+                    'supports_source' => [],
+                    'required' => ['filterQueryId'],
+                ],
+            ],
+            'common_settings' => [
+                'filterQueryId' => 'ID Bricks de la Query Loop cible (container/posts avec hasLoop=true).',
+                'filterSource' => 'taxonomy | wpField | customField',
+                'filterAction' => 'filter | sort | per_page',
+                'filterApplyOn' => 'change | click',
+                'filterNiceName' => 'Nom de paramètre URL optionnel pour une URL propre.',
+                'filterTaxonomy' => 'Slug de taxonomie quand filterSource=taxonomy.',
+                'wpPostField' => 'Champ WP quand filterSource=wpField : post_id, post_date, post_author, post_type, post_status, post_modified.',
+            ],
+            'workflow_example' => [
+                '1. create_or_find_query_loop' => 'Créer ou récupérer un élément Query Loop avec hasLoop=true.',
+                '2. note_query_element_id' => 'Conserver l’ID Bricks de cet élément, ex: abc123.',
+                '3. add_filter_element' => 'Ajouter filter-checkbox/filter-radio/filter-select sur la même page.',
+                '4. bind_filter_to_query' => 'Renseigner filterQueryId="abc123", puis filterSource et éventuellement filterTaxonomy.',
+                '5. enable_query_filters' => 'Activer Query filters dans Bricks > Settings > Performance si ce n’est pas déjà fait.',
+                '6. verify_frontend' => 'Valider sur le frontend avec plusieurs posts/termes réels.',
             ],
         ];
     }

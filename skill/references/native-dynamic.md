@@ -59,6 +59,7 @@ Règles :
 - activer `Bricks > Settings > Query filters` avant de créer des filtres ;
 - chaque filtre doit cibler une `Target Query` Bricks existante ;
 - ne pas placer un filtre dans un component Bricks sauf si la racine du component est la query loop ;
+- appeler `get_filter_schema()` avant de configurer un filtre natif ;
 - si `get_element_schema(filter-*)` revient du fallback officiel et ne montre que les styles, créer un filtre minimal en UI Bricks puis lire l'élément avec `get_element` pour récupérer les clés exactes de liaison.
 
 ## Image Cover Dans Query Loop
