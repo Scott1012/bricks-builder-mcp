@@ -9,7 +9,6 @@ health_check()
 check_skill_version({localVersion})
 get_global_styles()
 get_element_schema()
-get_filter_schema()
 list_color_palette()
 list_global_classes()
 list_theme_styles()
@@ -20,7 +19,7 @@ list_components()
 
 `get_element_schema()` sans argument retourne le catalogue compact des éléments Bricks disponibles. Avec `element`, il retourne les contrôles runtime de cet élément. Si Bricks ne liste pas un élément natif dans le registre local, l'outil peut utiliser le schema officiel Bricks Academy en fallback ; vérifier ensuite avec `get_element` sur un exemple créé en UI si la liaison dynamique est sensible.
 
-`get_filter_schema()` est l'outil préféré pour les Query Filters Bricks. Il donne les clés de liaison utiles (`filterQueryId`, `filterSource`, `filterTaxonomy`, etc.), les points de départ par type de filtre, et dit si les Query Filters sont activés côté Bricks. Démarrer par le plus petit payload possible, vérifier, puis ajouter les options avancées une par une.
+`get_filter_schema()` ne sert plus de point de départ recommandé. Le garder seulement pour diagnostiquer un filtre natif déjà présent ou un cas legacy ; pour un nouveau module de filtre, préférer une implémentation code isolée.
 
 ## Pages
 

@@ -56,34 +56,9 @@ Ces éléments doivent être reliés à une query réelle.
 
 Règles :
 
-- activer `Bricks > Settings > Query filters` avant de créer des filtres ;
-- chaque filtre doit cibler une `Target Query` Bricks existante ;
-- ne pas placer un filtre dans un component Bricks sauf si la racine du component est la query loop ;
-- appeler `get_filter_schema()` avant de configurer un filtre natif ;
-- si `get_element_schema(filter-*)` revient du fallback officiel et ne montre que les styles, créer un filtre minimal en UI Bricks puis lire l'élément avec `get_element` pour récupérer les clés exactes de liaison.
-
-Settings communs à connaître :
-
-- `filterQueryId` : ID Bricks 6 caractères de l'élément Query Loop cible ;
-- `filterSource` : `taxonomy` | `wpField` | `customField` ;
-- `filterAction` : `filter` | `sort` | `per_page` ;
-- `filterApplyOn` : `change` | `click` ;
-- `filterTaxonomy` : slug de taxonomie si `filterSource=taxonomy` ;
-- `filterNiceName` : nom de paramètre URL optionnel.
-
-Points de départ utiles :
-
-- `filter-checkbox` : partir sur `filterQueryId`, `filterSource`, `filterTaxonomy`, `displayMode=default` ;
-- `filter-radio` : même base que checkbox, ajouter `filterAction=filter` si le filtre agit directement sur la loop ;
-- `filter-select` : même base, puis seulement si nécessaire `choicesJs`, `choicesSearch`, `enableMultiple` ;
-- `filter-search` : au minimum `filterQueryId` ;
-- `filter-range` et `filter-datepicker` : ajouter seulement après avoir validé un cas simple en frontend.
-
-Workflow sûr :
-
-- valider d'abord un payload minimal avec `verify_element()` ;
-- ajouter ensuite les options avancées une par une ;
-- si le filtre disparaît du DOM, revenir au dernier état minimal valide au lieu de repartir d'un payload complet.
+- ne pas repartir par défaut dans une implémentation native des Query Filters ;
+- si un vrai module de filtre est nécessaire, préférer un module code isolé, avec wrapper Bricks autour pour garder la page éditable ;
+- ne revenir aux filtres natifs Bricks que sur demande explicite de l'utilisateur ou pour maintenance d'un existant.
 
 ## Image Cover Dans Query Loop
 
