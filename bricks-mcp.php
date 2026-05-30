@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude et Codex. Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork et l'installeur Codex, avec skill bricks-builder embarqué.
- * Version: 4.3.4
+ * Version: 4.3.5
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '4.3.4');
+define('BRICKS_MCP_VERSION', '4.3.5');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -3878,11 +3878,19 @@ class BricksMCPServer {
             . "    json.dump(data, fh, ensure_ascii=False, indent=2)\n"
             . "    fh.write('\\n')\n"
             . "PY\n\n"
+            . "CODEX_BIN=\"\"\n"
             . "if command -v codex >/dev/null 2>&1; then\n"
+            . "  CODEX_BIN=\"\$(command -v codex)\"\n"
+            . "elif [ -x \"/Applications/Codex.app/Contents/Resources/codex\" ]; then\n"
+            . "  CODEX_BIN=\"/Applications/Codex.app/Contents/Resources/codex\"\n"
+            . "elif [ -x \"\$HOME/Applications/Codex.app/Contents/Resources/codex\" ]; then\n"
+            . "  CODEX_BIN=\"\$HOME/Applications/Codex.app/Contents/Resources/codex\"\n"
+            . "fi\n\n"
+            . "if [ -n \"\$CODEX_BIN\" ]; then\n"
             . "  echo \"Activation/rafraîchissement du plugin dans Codex...\"\n"
-            . "  codex plugin add \"\$PLUGIN_NAME@personal\"\n"
+            . "  \"\$CODEX_BIN\" plugin add \"\$PLUGIN_NAME@personal\"\n"
             . "else\n"
-            . "  echo \"CLI Codex introuvable. Lance manuellement : codex plugin add \$PLUGIN_NAME@personal\"\n"
+            . "  echo \"CLI Codex introuvable. Lance manuellement : /Applications/Codex.app/Contents/Resources/codex plugin add \$PLUGIN_NAME@personal\"\n"
             . "fi\n\n"
             . "echo\n"
             . "echo \"Installation Codex terminée pour \$PLUGIN_NAME.\"\n"
