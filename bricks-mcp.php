@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude et Codex. Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork et l'installeur Codex, avec skill bricks-builder embarqué.
- * Version: 4.3.6
+ * Version: 4.3.7
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '4.3.6');
+define('BRICKS_MCP_VERSION', '4.3.7');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -1549,6 +1549,7 @@ class BricksMCPServer {
             'schema_type' => 'guide_schema',
             'notes' => [
                 'Cet outil donne les clés métier utiles pour brancher les filtres Query. Ce n’est pas un schema runtime exhaustif généré par Bricks.',
+                'Les sous-options listées ici reprennent la structure documentée et testée par d’autres intégrations Bricks MCP. Elles servent de référence rapide tant qu’un vrai filtre UI n’a pas encore été inspecté sur le site.',
                 'Pour une version Bricks future ou un cas limite, créer un filtre minimal dans l’UI puis inspecter avec get_element reste la méthode de vérification finale.',
                 'filterQueryId doit cibler l’ID Bricks de l’élément loop (6 caractères), pas un post ID WordPress.',
             ],
@@ -1557,26 +1558,61 @@ class BricksMCPServer {
                     'label' => 'Filter - Checkbox',
                     'supports_source' => ['taxonomy', 'wpField', 'customField'],
                     'required' => ['filterQueryId', 'filterSource'],
+                    'bricks_2_3' => [
+                        'show_more_less' => [
+                            'description' => 'Load more / show less pour les longues listes.',
+                            'limitOptions' => 'Nombre d’options visibles avant le bouton "show more".',
+                            'showMoreText' => 'Texte du bouton "show more". Supporte %number% pour le nombre d’éléments cachés.',
+                            'showLessText' => 'Texte du bouton "show less".',
+                            'styling_note' => 'Styles du bouton : showMoreButtonSize, showMoreButtonStyle, showMoreButtonOutline, showMoreButtonTypography, showMoreButtonBackground, showMoreButtonBorder.',
+                        ],
+                        'countAlignEnd' => 'Aligne le compteur en fin de ligne quand displayMode=default.',
+                    ],
                 ],
                 'filter-radio' => [
                     'label' => 'Filter - Radio',
                     'supports_source' => ['taxonomy', 'wpField', 'customField'],
                     'supports_action' => ['filter', 'sort', 'per_page'],
                     'required' => ['filterQueryId', 'filterSource'],
+                    'bricks_2_3' => [
+                        'show_more_less' => [
+                            'description' => 'Load more / show less pour les longues listes.',
+                            'limitOptions' => 'Nombre d’options visibles avant le bouton "show more".',
+                            'showMoreText' => 'Texte du bouton "show more". Supporte %number% pour le nombre d’éléments cachés.',
+                            'showLessText' => 'Texte du bouton "show less".',
+                            'styling_note' => 'Styles du bouton : showMoreButtonSize, showMoreButtonStyle, showMoreButtonOutline, showMoreButtonTypography, showMoreButtonBackground, showMoreButtonBorder.',
+                        ],
+                        'countAlignEnd' => 'Aligne le compteur en fin de ligne quand displayMode=default.',
+                    ],
                 ],
                 'filter-select' => [
                     'label' => 'Filter - Select',
                     'supports_source' => ['taxonomy', 'wpField', 'customField'],
                     'supports_action' => ['filter', 'sort', 'per_page'],
                     'required' => ['filterQueryId', 'filterSource'],
-                    'bricks_2_3_notes' => [
-                        'choicesJs' => 'Enhanced select Choices.js.',
-                        'choicesSearch' => 'Recherche dans le dropdown.',
-                        'enableMultiple' => 'Multi-sélection quand le mode le permet.',
+                    'bricks_2_3' => [
+                        'choices_js' => [
+                            'description' => 'Select enrichi via Choices.js. Ajoute recherche, multi-sélection et styles avancés.',
+                            'choicesJs' => 'Active le mode Choices.js.',
+                            'choicesPosition' => 'Position du dropdown : auto | bottom | top.',
+                            'search' => [
+                                'choicesSearch' => 'Active la recherche dans le dropdown.',
+                                'choicesSearchPlaceholder' => 'Placeholder du champ de recherche.',
+                                'choicesNoResultsText' => 'Texte affiché si aucun résultat.',
+                                'choicesNoChoicesText' => 'Texte affiché si aucune option disponible.',
+                                'styling_note' => 'Styles : choicesSearchBackground, choicesSearchTypography, choicesSearchInputTypography, choicesSearchInputPadding.',
+                            ],
+                            'multiple' => [
+                                'enableMultiple' => 'Active la multi-sélection.',
+                                'filterMultiLogic' => 'Logique de combinaison des valeurs multiples.',
+                                'styling_note' => 'Styles des pills : choicesPillGap, choicesPillBackground, choicesPillBorder, choicesPillTypography.',
+                            ],
+                            'styling_note' => 'Styles généraux : choicesPadding, choicesBackgroundColor, choicesBorderBase, choicesBorderColor, choicesBorderRadius, choicesFontSize, choicesTextColor, choicesArrowColor, choicesItemPadding, choicesDropdownBackground, choicesHighlightBackground, choicesHighlightTextColor, choicesDisabledBackground, choicesDisabledTextColor.',
+                        ],
                     ],
                 ],
                 'filter-search' => [
-                    'label' => 'Filter - Search',
+                    'label' => 'Filter - Search (Live Search)',
                     'supports_source' => [],
                     'required' => ['filterQueryId'],
                 ],
@@ -1584,14 +1620,22 @@ class BricksMCPServer {
                     'label' => 'Filter - Range',
                     'supports_source' => ['taxonomy', 'wpField', 'customField'],
                     'required' => ['filterQueryId', 'filterSource'],
+                    'bricks_2_3' => [
+                        'decimalPlaces' => 'Nombre de décimales affichées.',
+                        'inputUseCustomStepper' => 'Affiche des boutons +/- quand displayMode=input.',
+                        'stepper_styling_note' => 'Styles du stepper : inputStepperGap, inputStepperMarginStart, inputStepperBackground, inputStepperBorder, inputStepperTypography.',
+                    ],
                 ],
                 'filter-datepicker' => [
                     'label' => 'Filter - Datepicker',
                     'supports_source' => ['wpField', 'customField'],
                     'required' => ['filterQueryId', 'filterSource'],
+                    'bricks_2_3' => [
+                        'dateFormat' => 'Format d’affichage Flatpickr, ex: d/m/Y ou M j, Y.',
+                    ],
                 ],
                 'filter-submit' => [
-                    'label' => 'Filter - Submit / Reset',
+                    'label' => 'Filter - Submit button',
                     'supports_source' => [],
                     'required' => ['filterQueryId'],
                     'note' => 'Utile quand filterApplyOn=click sur les autres filtres.',
@@ -1611,6 +1655,7 @@ class BricksMCPServer {
                 'filterTaxonomy' => 'Slug de taxonomie quand filterSource=taxonomy.',
                 'wpPostField' => 'Champ WP quand filterSource=wpField : post_id, post_date, post_author, post_type, post_status, post_modified.',
             ],
+            'filterQueryId_note' => 'filterQueryId doit être l’ID Bricks 6 caractères de l’élément loop, pas un post ID WordPress.',
             'workflow_example' => [
                 '1. create_or_find_query_loop' => 'Créer ou récupérer un élément Query Loop avec hasLoop=true.',
                 '2. note_query_element_id' => 'Conserver l’ID Bricks de cet élément, ex: abc123.',

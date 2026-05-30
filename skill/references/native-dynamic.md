@@ -62,6 +62,23 @@ Règles :
 - appeler `get_filter_schema()` avant de configurer un filtre natif ;
 - si `get_element_schema(filter-*)` revient du fallback officiel et ne montre que les styles, créer un filtre minimal en UI Bricks puis lire l'élément avec `get_element` pour récupérer les clés exactes de liaison.
 
+Settings communs à connaître :
+
+- `filterQueryId` : ID Bricks 6 caractères de l'élément Query Loop cible ;
+- `filterSource` : `taxonomy` | `wpField` | `customField` ;
+- `filterAction` : `filter` | `sort` | `per_page` ;
+- `filterApplyOn` : `change` | `click` ;
+- `filterTaxonomy` : slug de taxonomie si `filterSource=taxonomy` ;
+- `filterNiceName` : nom de paramètre URL optionnel.
+
+Points de départ utiles :
+
+- `filter-checkbox` : partir sur `filterQueryId`, `filterSource`, `filterTaxonomy`, `displayMode=default` ;
+- `filter-radio` : même base que checkbox, ajouter `filterAction=filter` si le filtre agit directement sur la loop ;
+- `filter-select` : même base, puis seulement si nécessaire `choicesJs`, `choicesSearch`, `enableMultiple` ;
+- `filter-search` : au minimum `filterQueryId` ;
+- `filter-range` et `filter-datepicker` : ajouter seulement après avoir validé un cas simple en frontend.
+
 ## Image Cover Dans Query Loop
 
 Ne pas faire un cover avec `_position:absolute` sur l'image dynamique d'une Query Loop sans test : les clones peuvent se dimensionner sur toute la section.

@@ -20,7 +20,7 @@ list_components()
 
 `get_element_schema()` sans argument retourne le catalogue compact des éléments Bricks disponibles. Avec `element`, il retourne les contrôles runtime de cet élément. Si Bricks ne liste pas un élément natif dans le registre local, l'outil peut utiliser le schema officiel Bricks Academy en fallback ; vérifier ensuite avec `get_element` sur un exemple créé en UI si la liaison dynamique est sensible.
 
-`get_filter_schema()` est l'outil préféré pour les Query Filters Bricks. Il donne les clés de liaison utiles (`filterQueryId`, `filterSource`, `filterTaxonomy`, etc.) et dit si les Query Filters sont activés côté Bricks.
+`get_filter_schema()` est l'outil préféré pour les Query Filters Bricks. Il donne les clés de liaison utiles (`filterQueryId`, `filterSource`, `filterTaxonomy`, etc.), les points de départ par type de filtre, et dit si les Query Filters sont activés côté Bricks.
 
 ## Pages
 
