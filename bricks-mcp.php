@@ -3,7 +3,7 @@
  * Plugin Name: Bricks Builder MCP Server
  * Plugin URI: https://github.com/Scott1012/bricks-builder-mcp
  * Description: Serveur MCP optimisé pour piloter Bricks Builder depuis Claude et Codex. Gère les pages, éléments, ordre des sections + génère le fichier .plugin Cowork et l'installeur Codex, avec skill bricks-builder embarqué.
- * Version: 4.3.3
+ * Version: 4.3.4
  * Author: Mathieu Maap
  * License: GPL v2 or later
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 define('BRICKS_MCP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BRICKS_MCP_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BRICKS_MCP_VERSION', '4.3.3');
+define('BRICKS_MCP_VERSION', '4.3.4');
 
 // URL du repo GitHub pour l'auto-update (Releases)
 // Modifiable via l'option 'bricks_mcp_github_repo' dans WP admin
@@ -1433,13 +1433,33 @@ class BricksMCPServer {
                     'category' => $schema['category'],
                     'controlCount' => $schema['controlCount'],
                     'nestable' => $schema['nestable'],
+                    'source' => 'runtime',
                 ];
             }
+
+            foreach ($this->get_official_element_schema_fallback_catalog() as $name => $fallback) {
+                if (isset($schemas[$name])) {
+                    continue;
+                }
+
+                $catalog[] = [
+                    'name' => $name,
+                    'label' => $fallback['label'],
+                    'category' => $fallback['category'],
+                    'controlCount' => null,
+                    'nestable' => $fallback['nestable'],
+                    'source' => 'official_schema_fallback',
+                ];
+            }
+
+            usort($catalog, function ($a, $b) {
+                return strcmp($a['name'], $b['name']);
+            });
 
             return [
                 'success' => true,
                 'mode' => 'catalog',
-                'source' => 'Bricks runtime registry',
+                'source' => 'Bricks runtime registry + official schema fallback catalog',
                 'bricks_version' => defined('BRICKS_VERSION') ? BRICKS_VERSION : null,
                 'total_elements' => count($catalog),
                 'catalog' => $catalog,
@@ -1450,19 +1470,27 @@ class BricksMCPServer {
             ];
         }
 
-        if (!isset($schemas[$element])) {
+        $source = 'Bricks runtime registry';
+        $schema = $schemas[$element] ?? null;
+
+        if (!$schema) {
+            $schema = $this->get_official_bricks_element_schema($element);
+            $source = 'Bricks Academy official schema fallback';
+        }
+
+        if (!$schema) {
             return new WP_Error(
                 'element_schema_not_found',
-                sprintf('Element "%s" introuvable dans le registre Bricks.', $element),
+                sprintf('Element "%s" introuvable dans le registre Bricks et dans le fallback schema officiel.', $element),
                 [
                     'status' => 404,
                     'element' => $element,
                     'suggestions' => $this->find_similar_strings($element, array_keys($schemas)),
+                    'fallbackCatalog' => array_keys($this->get_official_element_schema_fallback_catalog()),
                 ]
             );
         }
 
-        $schema = $schemas[$element];
         if ($include_inherited) {
             $schema['inheritedControls'] = $this->get_inherited_bricks_style_controls();
         }
@@ -1470,14 +1498,169 @@ class BricksMCPServer {
         return [
             'success' => true,
             'mode' => 'element',
-            'source' => 'Bricks runtime registry',
+            'source' => $source,
             'bricks_version' => defined('BRICKS_VERSION') ? BRICKS_VERSION : null,
             'schema' => $schema,
             'notes' => [
-                'controls_source' => 'Contrôles renvoyés par get_controls() sur la classe runtime Bricks.',
+                'controls_source' => $source === 'Bricks runtime registry'
+                    ? 'Contrôles renvoyés par get_controls() sur la classe runtime Bricks.'
+                    : 'Schema JSON officiel Bricks Academy utilisé parce que le registre runtime local ne liste pas cet élément.',
                 'format_warning' => 'Le type de contrôle Bricks indique la clé et l’intention. Pour les formats sensibles, valider avec verify_element après écriture.',
+                'query_filter_warning' => strpos($element, 'filter-') === 0
+                    ? 'Les filtres Query doivent être activés dans Bricks > Settings > Query filters et reliés à une Target Query réelle. Si le schema officiel ne montre que les styles, créer un exemple en UI puis inspecter avec get_element avant automatisation.'
+                    : null,
             ],
         ];
+    }
+
+    private function get_official_element_schema_fallback_catalog() {
+        return [
+            'filter-active-filters' => ['label' => 'Filter - Active Filters', 'category' => 'filter', 'nestable' => false],
+            'filter-checkbox' => ['label' => 'Filter - Checkbox', 'category' => 'filter', 'nestable' => false],
+            'filter-datepicker' => ['label' => 'Filter - Datepicker', 'category' => 'filter', 'nestable' => false],
+            'filter-radio' => ['label' => 'Filter - Radio', 'category' => 'filter', 'nestable' => false],
+            'filter-range' => ['label' => 'Filter - Range', 'category' => 'filter', 'nestable' => false],
+            'filter-search' => ['label' => 'Filter - Search', 'category' => 'filter', 'nestable' => false],
+            'filter-select' => ['label' => 'Filter - Select', 'category' => 'filter', 'nestable' => false],
+            'filter-submit' => ['label' => 'Filter - Submit / Reset', 'category' => 'filter', 'nestable' => false],
+        ];
+    }
+
+    private function get_official_bricks_element_schema($element_name) {
+        $element_name = sanitize_key((string) $element_name);
+        if ($element_name === '') {
+            return null;
+        }
+
+        $cache_key = 'bricks_mcp_schema_' . md5($element_name);
+        $cached = get_transient($cache_key);
+        if (is_array($cached)) {
+            return $cached;
+        }
+
+        $url = sprintf(
+            'https://academy.bricksbuilder.io/schema-resolved/elements/%s.json',
+            rawurlencode($element_name)
+        );
+
+        $response = wp_remote_get($url, [
+            'timeout' => 8,
+            'redirection' => 3,
+            'headers' => [
+                'Accept' => 'application/json',
+            ],
+        ]);
+
+        if (is_wp_error($response)) {
+            return null;
+        }
+
+        $status = (int) wp_remote_retrieve_response_code($response);
+        if ($status !== 200) {
+            return null;
+        }
+
+        $data = json_decode(wp_remote_retrieve_body($response), true);
+        if (!is_array($data) || empty($data['metadata']) || !is_array($data['metadata'])) {
+            return null;
+        }
+
+        $schema = $this->convert_official_element_schema($element_name, $data, $url);
+        if ($schema) {
+            set_transient($cache_key, $schema, DAY_IN_SECONDS);
+        }
+
+        return $schema;
+    }
+
+    private function convert_official_element_schema($fallback_name, $data, $url) {
+        $metadata = isset($data['metadata']) && is_array($data['metadata']) ? $data['metadata'] : [];
+        $settings = isset($data['settings']) && is_array($data['settings']) ? $data['settings'] : [];
+        $name = isset($metadata['name']) ? sanitize_key((string) $metadata['name']) : $fallback_name;
+
+        if ($name === '') {
+            return null;
+        }
+
+        $compact_controls = [];
+        $settings_properties = [];
+
+        foreach ($settings as $key => $setting) {
+            if (!is_array($setting)) {
+                continue;
+            }
+
+            $key = (string) $key;
+            $compact_controls[] = $this->compact_official_schema_setting($key, $setting);
+            $settings_properties[$key] = $this->official_setting_to_json_schema($setting, $key);
+        }
+
+        return [
+            'name' => $name,
+            'label' => isset($data['title']) ? wp_strip_all_tags((string) $data['title']) : (isset($metadata['label']) ? wp_strip_all_tags((string) $metadata['label']) : $name),
+            'category' => isset($metadata['category']) ? (string) $metadata['category'] : 'unknown',
+            'nestable' => !empty($metadata['nestable']),
+            'controlCount' => count($compact_controls),
+            'controls' => $compact_controls,
+            'settingsSchema' => [
+                'type' => 'object',
+                'additionalProperties' => true,
+                'properties' => empty($settings_properties) ? new stdClass() : $settings_properties,
+            ],
+            'minimalElement' => [
+                'id' => 'example_id',
+                'name' => $name,
+                'parent' => 'parent_id',
+                'children' => [],
+                'settings' => new stdClass(),
+            ],
+            'officialSchemaUrl' => $url,
+            'officialSchemaVersion' => isset($data['schemaVersion']) ? (string) $data['schemaVersion'] : null,
+        ];
+    }
+
+    private function compact_official_schema_setting($key, $setting) {
+        $out = [
+            'key' => $key,
+            'type' => isset($setting['controlType']) ? (string) $setting['controlType'] : 'mixed',
+            'label' => isset($setting['label']) ? wp_strip_all_tags((string) $setting['label']) : null,
+            'valueFormat' => $this->control_value_format(isset($setting['controlType']) ? (string) $setting['controlType'] : 'mixed'),
+        ];
+
+        if (!empty($setting['options']) && is_array($setting['options'])) {
+            $out['options'] = $this->compact_control_options($setting['options']);
+        }
+
+        if (!empty($setting['css'])) {
+            $out['css'] = $this->sanitize_schema_value($setting['css'], 0, 4);
+        }
+
+        if (!empty($setting['valueSchema'])) {
+            $out['valueSchema'] = $this->sanitize_schema_value($setting['valueSchema'], 0, 5);
+        }
+
+        return array_filter($out, function ($value) {
+            return $value !== null && $value !== [];
+        });
+    }
+
+    private function official_setting_to_json_schema($setting, $key) {
+        $schema = [];
+        if (!empty($setting['valueSchema']) && is_array($setting['valueSchema'])) {
+            $schema = $this->sanitize_schema_value($setting['valueSchema'], 0, 6);
+        }
+
+        if (!is_array($schema) || empty($schema)) {
+            $schema = [
+                'description' => isset($setting['label']) ? wp_strip_all_tags((string) $setting['label']) : $key,
+            ];
+        }
+
+        if (isset($setting['label']) && empty($schema['description'])) {
+            $schema['description'] = wp_strip_all_tags((string) $setting['label']);
+        }
+
+        return $schema;
     }
 
     private function parse_bool_param($value, $default = false) {

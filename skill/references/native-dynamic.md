@@ -54,6 +54,24 @@ Workflow :
 
 Ces éléments doivent être reliés à une query réelle.
 
+Règles :
+
+- activer `Bricks > Settings > Query filters` avant de créer des filtres ;
+- chaque filtre doit cibler une `Target Query` Bricks existante ;
+- ne pas placer un filtre dans un component Bricks sauf si la racine du component est la query loop ;
+- si `get_element_schema(filter-*)` revient du fallback officiel et ne montre que les styles, créer un filtre minimal en UI Bricks puis lire l'élément avec `get_element` pour récupérer les clés exactes de liaison.
+
+## Image Cover Dans Query Loop
+
+Ne pas faire un cover avec `_position:absolute` sur l'image dynamique d'une Query Loop sans test : les clones peuvent se dimensionner sur toute la section.
+
+Pattern sûr :
+
+- wrapper carte/image : `_display: "block"`, `_aspectRatio: "4/3"`, `_overflow: "hidden"` ;
+- image dynamique : `image.useDynamicData: "{featured_image}"`, `_display: "block"`, `_width: "100%"`, `_height: "100%"` ;
+- pour le recadrage, préférer un style scoped à une classe image/wrapper (`object-fit: cover`) si aucun setting natif fiable n'est exposé par `get_element_schema("image")` ;
+- toujours valider avec `verify_element` sur desktop et mobile, car les erreurs Query Loop se voient seulement sur les clones frontend.
+
 ## WordPress Elements
 
 | Besoin | Élément |

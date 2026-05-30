@@ -17,7 +17,7 @@ list_custom_fonts()
 list_components()
 ```
 
-`get_element_schema()` sans argument retourne le catalogue compact des éléments Bricks disponibles. Avec `element`, il retourne les contrôles runtime de cet élément.
+`get_element_schema()` sans argument retourne le catalogue compact des éléments Bricks disponibles. Avec `element`, il retourne les contrôles runtime de cet élément. Si Bricks ne liste pas un élément natif dans le registre local, l'outil peut utiliser le schema officiel Bricks Academy en fallback ; vérifier ensuite avec `get_element` sur un exemple créé en UI si la liaison dynamique est sensible.
 
 ## Pages
 

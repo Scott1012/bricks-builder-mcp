@@ -830,7 +830,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_element_schema",
-        description: "Découvre les éléments Bricks disponibles et leurs contrôles natifs depuis le registre runtime Bricks. Sans `element`, retourne le catalogue compact. Avec `element` (ex: button, image, form), retourne les contrôles/settings de cet élément + les settings hérités communs si includeInherited=true.",
+        description: "Découvre les éléments Bricks disponibles et leurs contrôles natifs. Sans `element`, retourne le catalogue compact. Avec `element` (ex: button, image, form), retourne les contrôles/settings runtime si disponibles, sinon tente le schema officiel Bricks Academy en fallback + les settings hérités communs si includeInherited=true.",
         inputSchema: {
           type: "object",
           properties: {
@@ -2087,17 +2087,26 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
               const allBrxe = Array.from(el.querySelectorAll('[id^="brxe-"], [class*="brxe-"]'));
               const emptyContainers = [];
               const MIN_AREA = 2500;
+              const MEDIA_TAGS = new Set(['IMG', 'PICTURE', 'SVG', 'VIDEO', 'IFRAME', 'CANVAS', 'AUDIO', 'OBJECT', 'EMBED']);
+              const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
               allBrxe.forEach(b => {
+                // Bricks 2.3 peut rendre l'élément Image directement en <img class="brxe-image">.
+                // Dans ce cas l'élément EST le média, pas un wrapper vide.
+                if (MEDIA_TAGS.has(b.tagName) || INTERACTIVE_TAGS.has(b.tagName)) return;
                 const brect = b.getBoundingClientRect();
                 if (brect.width < 50 || brect.height < 50) return;
                 const area = brect.width * brect.height;
                 if (area < MIN_AREA) return;
                 const hasText = (b.textContent || '').trim().length > 0;
-                const hasMedia = b.querySelector('img, picture, svg, video, iframe') !== null;
+                const hasMedia = b.querySelector('img, picture, svg, video, iframe, canvas, audio, object, embed') !== null;
                 const hasInteractive = b.querySelector('a, button, input, select, textarea') !== null;
                 const bcs = getComputedStyle(b);
                 const hasBgImg = bcs.backgroundImage && bcs.backgroundImage !== 'none';
-                if (!hasText && !hasMedia && !hasInteractive && !hasBgImg) {
+                const hasChildBgImg = !hasBgImg && Array.from(b.children).some(c => {
+                  const ccs = getComputedStyle(c);
+                  return ccs.backgroundImage && ccs.backgroundImage !== 'none';
+                });
+                if (!hasText && !hasMedia && !hasInteractive && !hasBgImg && !hasChildBgImg) {
                   emptyContainers.push({
                     id: b.id || '',
                     classes: Array.from(b.classList).filter(c => c.startsWith('brxe-')),
